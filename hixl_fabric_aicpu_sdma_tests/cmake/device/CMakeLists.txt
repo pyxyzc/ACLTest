@@ -19,10 +19,14 @@ add_cann_target_options()
 
 get_filename_component(ACLTEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
 include(${ACLTEST_DIR}/version.cmake)
-set(CMAKE_MODULE_PATH ${CANN_CMAKE_DIR}/modules ${CMAKE_MODULE_PATH})
-if(DEFINED ENV{ASCEND_HOME_PATH})
-  set(ASCEND_INSTALL_PATH "$ENV{ASCEND_HOME_PATH}")
+include(${ACLTEST_DIR}/cmake/locate_ascend.cmake)
+acltest_find_ascend_install_path(ASCEND_INSTALL_PATH)
+if(NOT ASCEND_INSTALL_PATH)
+  message(FATAL_ERROR
+    "CANN was not found under /usr/local/Ascend. Set ASCEND_HOME_PATH to its root.")
 endif()
+message(STATUS "Using CANN installation: ${ASCEND_INSTALL_PATH}")
+set(CMAKE_MODULE_PATH ${CANN_CMAKE_DIR}/modules ${CMAKE_MODULE_PATH})
 set(CMAKE_PREFIX_PATH ${ASCEND_INSTALL_PATH} ${CMAKE_PREFIX_PATH})
 
 acltest_find_cann_package(ascend_hal MODULE REQUIRED)

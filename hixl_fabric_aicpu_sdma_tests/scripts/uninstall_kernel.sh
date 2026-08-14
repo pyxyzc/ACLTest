@@ -4,7 +4,12 @@
 # See LICENSE in the root of the software repository for the full text.
 
 set -euo pipefail
-ascend_home="${ASCEND_HOME_PATH:-/usr/local/Ascend/cann}"
+project_dir=$(cd "$(dirname "$0")/.." && pwd)
+ascend_home="${ASCEND_HOME_PATH:-}"
+
+# shellcheck disable=SC1091
+source "${project_dir}/scripts/ascend_env.sh"
+
 if [[ ${1:-} == "--ascend-home" ]]; then
   ascend_home="$2"
   shift 2
@@ -12,6 +17,13 @@ fi
 if [[ $# -ne 0 ]]; then
   echo "Usage: $0 [--ascend-home PATH]" >&2
   exit 2
+fi
+
+if [[ -z "${ascend_home}" ]]; then
+  ascend_home="$(acltest_find_ascend_home)" || {
+    echo "CANN was not found under /usr/local/Ascend; pass --ascend-home or set ASCEND_HOME_PATH." >&2
+    exit 1
+  }
 fi
 
 json_target="${ascend_home}/opp/built-in/op_impl/aicpu/config/libacltest_sdma_kernel.json"

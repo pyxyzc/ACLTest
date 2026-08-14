@@ -6,8 +6,11 @@
 set -euo pipefail
 project_dir=$(cd "$(dirname "$0")/.." && pwd)
 source_root="${project_dir}/build_out/opp/built-in/op_impl/aicpu"
-ascend_home="${ASCEND_HOME_PATH:-/usr/local/Ascend/cann}"
+ascend_home="${ASCEND_HOME_PATH:-}"
 force=0
+
+# shellcheck disable=SC1091
+source "${project_dir}/scripts/ascend_env.sh"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -29,6 +32,13 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ -z "${ascend_home}" ]]; then
+  ascend_home="$(acltest_find_ascend_home)" || {
+    echo "CANN was not found under /usr/local/Ascend; pass --ascend-home or set ASCEND_HOME_PATH." >&2
+    exit 1
+  }
+fi
 
 json_source="${source_root}/config/libacltest_sdma_kernel.json"
 archive_source="${source_root}/kernel/acltest-sdma-compat.tar.gz"

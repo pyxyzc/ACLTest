@@ -18,15 +18,13 @@ include(version.cmake)
 
 option(ACLTEST_BUILD_DEVICE "Build the AclTest-owned built-in AICPU package" ON)
 
-if(DEFINED ENV{ASCEND_HOME_PATH})
-  set(ASCEND_INSTALL_PATH "$ENV{ASCEND_HOME_PATH}")
-elseif(EXISTS "/usr/local/Ascend/ascend-toolkit/latest")
-  set(ASCEND_INSTALL_PATH "/usr/local/Ascend/ascend-toolkit/latest")
-elseif(EXISTS "/usr/local/Ascend/cann")
-  set(ASCEND_INSTALL_PATH "/usr/local/Ascend/cann")
-else()
-  message(FATAL_ERROR "CANN was not found. Source set_env.sh or set ASCEND_HOME_PATH.")
+include(cmake/locate_ascend.cmake)
+acltest_find_ascend_install_path(ASCEND_INSTALL_PATH)
+if(NOT ASCEND_INSTALL_PATH)
+  message(FATAL_ERROR
+    "CANN was not found under /usr/local/Ascend. Set ASCEND_HOME_PATH to its root.")
 endif()
+message(STATUS "Using CANN installation: ${ASCEND_INSTALL_PATH}")
 
 set(CMAKE_MODULE_PATH ${CANN_CMAKE_DIR}/modules ${CMAKE_MODULE_PATH})
 set(CMAKE_PREFIX_PATH ${ASCEND_INSTALL_PATH} ${CMAKE_PREFIX_PATH})

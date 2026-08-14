@@ -12,6 +12,8 @@ HIXL FabricMem AICPU SDMA 验证的入口：
 
 ```bash
 cd hixl_fabric_aicpu_sdma_tests
-source "${ASCEND_HOME_PATH:-/usr/local/Ascend/cann}/set_env.sh"
 bash build.sh
 ```
+
+`build.sh` 会优先使用 `ASCEND_HOME_PATH`，未设置时自动发现 `/usr/local/Ascend`
+下的 CANN 安装；也可以在执行前手动 source 对应版本的 `set_env.sh`。

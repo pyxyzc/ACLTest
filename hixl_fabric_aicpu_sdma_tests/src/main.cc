@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <glob.h>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -188,14 +189,56 @@ bool IsA3Soc(const char *name) {
   });
 }
 
+std::string KernelJsonPath(const std::string &root) {
+  return root + "/opp/built-in/op_impl/aicpu/config/libacltest_sdma_kernel.json";
+}
+
+bool IsReadableFile(const std::string &path) {
+  std::ifstream file(path);
+  return file.good();
+}
+
+std::string FindInstalledKernelJson() {
+  constexpr std::array<const char *, 4U> kPreferredRoots = {
+      "/usr/local/Ascend/ascend-toolkit/latest", "/usr/local/Ascend/latest",
+      "/usr/local/Ascend/cann", "/usr/local/Ascend",
+  };
+  for (const char *root : kPreferredRoots) {
+    const std::string path = KernelJsonPath(root);
+    if (IsReadableFile(path)) {
+      return path;
+    }
+  }
+
+  constexpr std::array<const char *, 2U> kRootPatterns = {
+      "/usr/local/Ascend/cann-*", "/usr/local/Ascend/ascend-toolkit/*",
+  };
+  for (const char *pattern : kRootPatterns) {
+    glob_t matches{};
+    if (glob(pattern, 0U, nullptr, &matches) == 0) {
+      for (size_t index = matches.gl_pathc; index > 0U; --index) {
+        const std::string path = KernelJsonPath(matches.gl_pathv[index - 1U]);
+        if (IsReadableFile(path)) {
+          globfree(&matches);
+          return path;
+        }
+      }
+    }
+    globfree(&matches);
+  }
+  return KernelJsonPath("/usr/local/Ascend");
+}
+
 std::string DefaultKernelJson() {
   const char *override_path = std::getenv("ACLTEST_KERNEL_JSON");
   if (override_path != nullptr && override_path[0] != '\0') {
     return override_path;
   }
   const char *ascend_home = std::getenv("ASCEND_HOME_PATH");
-  const std::string root = ascend_home == nullptr ? "/usr/local/Ascend/cann" : ascend_home;
-  return root + "/opp/built-in/op_impl/aicpu/config/libacltest_sdma_kernel.json";
+  if (ascend_home != nullptr && ascend_home[0] != '\0') {
+    return KernelJsonPath(ascend_home);
+  }
+  return FindInstalledKernelJson();
 }
 
 std::string TakeValue(int argc, char **argv, int &index, const std::string &argument) {

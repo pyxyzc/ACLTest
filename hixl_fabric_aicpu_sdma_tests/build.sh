@@ -48,14 +48,9 @@ if [[ "${build_type}" != "Release" && "${build_type}" != "Debug" ]]; then
 fi
 
 if [[ -z "${ASCEND_HOME_PATH:-}" ]]; then
-  if [[ -f /usr/local/Ascend/cann/set_env.sh ]]; then
-    source /usr/local/Ascend/cann/set_env.sh
-  elif [[ -f /usr/local/Ascend/ascend-toolkit/set_env.sh ]]; then
-    source /usr/local/Ascend/ascend-toolkit/set_env.sh
-  else
-    echo "CANN environment is unavailable. Source set_env.sh or set ASCEND_HOME_PATH." >&2
-    exit 1
-  fi
+  # shellcheck disable=SC1091
+  source "${project_dir}/scripts/ascend_env.sh"
+  acltest_source_ascend_env
 fi
 
 cmake -S "${project_dir}" -B "${build_dir}" \

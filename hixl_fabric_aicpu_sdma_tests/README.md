@@ -36,10 +36,13 @@
 需要完整的 CANN Toolkit/AICPU toolchain，并先加载环境：
 
 ```bash
-source "${ASCEND_HOME_PATH:-/usr/local/Ascend/cann}/set_env.sh"
 cd /root/ACLTest/hixl_fabric_aicpu_sdma_tests
 bash build.sh
 ```
+
+`build.sh` 会优先使用 `ASCEND_HOME_PATH`，未设置时自动从 `/usr/local/Ascend`
+下发现 CANN 安装目录，不依赖具体 CANN 版本号。也可以在执行前手动 source
+对应安装目录中的 `set_env.sh`。
 
 首次配置会按 HIXL 当前构建方式获取 `cann-cmake` 的 `master-044`。离线环境可以把仓库放到 `third_party/cann-cmake`，或者传入：
 
@@ -57,7 +60,7 @@ bash build.sh --cann-3rd-lib-path /path/to/third_party
 bash scripts/install_kernel.sh
 ```
 
-如果 CANN 不在 `ASCEND_HOME_PATH`：
+如果需要显式指定 CANN 根目录：
 
 ```bash
 bash scripts/install_kernel.sh --ascend-home /path/to/cann
@@ -68,6 +71,15 @@ bash scripts/install_kernel.sh --ascend-home /path/to/cann
 ```bash
 bash scripts/uninstall_kernel.sh
 ```
+
+清理本工程的 `build/`、`build_out/` 和已安装的两个 AclTest 文件：
+
+```bash
+bash scripts/clear.sh
+```
+
+脚本不会删除结果 CSV，也不会触碰 HIXL 或其他 CANN 文件；未自动发现 CANN 时可传入
+`--ascend-home PATH`。
 
 ## 运行
 
