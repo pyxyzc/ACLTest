@@ -52,6 +52,55 @@ bash clear.sh
 source /usr/local/Ascend/ascend-toolkit/latest/set_env.sh
 ```
 
+## UB 路径预判
+
+独立程序 `aclrt_memcpy_batch_path_test` 按
+`src/runtime/core/src/api_impl/api_impl_david.cc:867` 的判断顺序预判
+`aclrtMemcpyBatchAsync` 路径，不执行正式 benchmark：
+
+```bash
+./build_out/bin/aclrt_memcpy_batch_path_test \
+  --device 0 --host-memory pinned
+```
+
+需要脚本化断言必须进入 UB Batch DMA 时增加 `--require-ub`；若未命中，程序返回 2：
+
+```bash
+./build_out/bin/aclrt_memcpy_batch_path_test \
+  --device 0 --host-memory pinned --require-ub
+```
+
+该 test 会依次检查：
+
+- `ACL_DEV_ATTR_NPU_ARCH == 3510`，即 Ascend 950PR/950DT（A5）目标；
+- 将 ACL 用户 Device ID 转成 Runtime 逻辑 Device ID，再调用进程中已加载的
+  `halSupportFeature(logicDeviceId, FEATURE_MEMCPY_BATCH_ASYNC=3)`；
+- 严格保留源码 `!NpuDriver::CheckIsSupportFeature(...)` 的取反语义；
+- `ACL_DEV_ATTR_HD_CONNECT_TYPE` 是否为 UB；
+- 实际 Host 测试指针经 `aclrtPointerGetAttributes` 查询后是否为锁页/已注册内存。
+
+最终 `VERDICT` 的含义：
+
+| VERDICT | 对应源码路径 |
+| --- | --- |
+| `UB_BATCH_DMA` | 驱动 gate 进入 Runtime 分支、互联为 UB、Host 指针已注册 |
+| `LOOP_MEMCPY_ASYNC` | PCIe/HCCS 的逐项异步复制路径 |
+| `SYNC_MEMCPY_BATCH` | UB 分支中发现非锁页 Host 指针，先同步 Stream 再同步 batch |
+| `RT_ERROR_DRV_NOT_SUPPORT_EXPECTED` | 驱动 feature 查询为 true，按当前 867 行实现将返回不支持 |
+| `NOT_A5_API_IMPL_DAVID_PATH` | NPU 架构不是 A5 的 3510，不能用该 A5 判断下结论 |
+
+可用 `--host-memory pageable` 专门验证非锁页判断。若当前进程中没有
+`halSupportFeature` 符号，test 会与 `NpuDriver::CheckIsSupportFeature` 的弱符号处理保持一致，
+将该 feature 判为 false，并在 `driver_detail` 中明确打印原因。
+
+test 使用 `ascend_hal_base.h` 中 `halSupportFeature` 的精确函数类型，并用 `static_assert`
+锁定 `FEATURE_MEMCPY_BATCH_ASYNC = 3`；枚举 ABI 变化会直接导致构建失败，而不会静默查错
+feature。如果 HAL 头文件不在默认位置，可在配置时传入
+`bash build.sh --ascend-hal-include /path/to/ascend_hal/driver`。如果换到修改过分支逻辑的 Runtime
+源码，仍需同步更新 test。正式版 CANN Runtime 9.1.0 包含完整的
+A5 UB Batch DMA 单算子和 ACL Graph/Software SQ 路径；`9.1.0-beta.2.pre`、
+`9.1.0-beta.3` 只有较早的单算子基础版本，不能只根据 test 的单算子结论外推 Graph 路径。
+
 ## 运行
 
 默认扫描 `512B,1K,2K,4K,32K,64K,256K,512K,1M,2M`，batch count 固定为 128，

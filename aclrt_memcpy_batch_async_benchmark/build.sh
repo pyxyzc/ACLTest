@@ -8,9 +8,10 @@ output_dir="${project_dir}/build_out"
 jobs=8
 build_type=Release
 ascend_root="${ASCEND_HOME_PATH:-}"
+ascend_hal_include=""
 
 usage() {
-  echo "Usage: $0 [-j N] [--build-type Release|Debug] [--ascend-root PATH]"
+  echo "Usage: $0 [-j N] [--build-type Release|Debug] [--ascend-root PATH] [--ascend-hal-include PATH]"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -28,6 +29,11 @@ while [[ $# -gt 0 ]]; do
     --ascend-root)
       [[ $# -ge 2 ]] || { echo "--ascend-root requires a path" >&2; exit 2; }
       ascend_root="$2"
+      shift 2
+      ;;
+    --ascend-hal-include)
+      [[ $# -ge 2 ]] || { echo "--ascend-hal-include requires a path" >&2; exit 2; }
+      ascend_hal_include="$2"
       shift 2
       ;;
     -h|--help)
@@ -54,6 +60,10 @@ if [[ -n "${ascend_root}" && ! -d "${ascend_root}" ]]; then
   echo "Ascend root does not exist: ${ascend_root}" >&2
   exit 2
 fi
+if [[ -n "${ascend_hal_include}" && ! -d "${ascend_hal_include}" ]]; then
+  echo "Ascend HAL include directory does not exist: ${ascend_hal_include}" >&2
+  exit 2
+fi
 
 cmake_args=(
   -S "${project_dir}"
@@ -63,13 +73,18 @@ cmake_args=(
 if [[ -n "${ascend_root}" ]]; then
   cmake_args+=("-DASCEND_ROOT=${ascend_root}")
 fi
+if [[ -n "${ascend_hal_include}" ]]; then
+  cmake_args+=("-DASCEND_HAL_INCLUDE_DIR=${ascend_hal_include}")
+fi
 
 cmake "${cmake_args[@]}"
 cmake --build "${build_dir}" --parallel "${jobs}"
 
 mkdir -p "${output_dir}/bin"
-install -m 0755 "${build_dir}/aclrt_memcpy_batch_bench" \
-  "${output_dir}/bin/aclrt_memcpy_batch_bench"
+executables=(aclrt_memcpy_batch_bench aclrt_memcpy_batch_path_test)
+for executable in "${executables[@]}"; do
+  install -m 0755 "${build_dir}/${executable}" "${output_dir}/bin/${executable}"
+done
 
 echo "Build output: ${output_dir}/bin/aclrt_memcpy_batch_bench"
-
+echo "Path test:    ${output_dir}/bin/aclrt_memcpy_batch_path_test"
