@@ -44,14 +44,68 @@ acltest_show_secverify_state() {
   return "${failed}"
 }
 
-acltest_set_all_custom_op_secverify() {
+acltest_print_secverify_usage() {
+  local script_name=$1
+
+  cat <<EOF
+Usage: ${script_name} [--device-id ID]
+       ${script_name} [-i ID]
+       ${script_name} [ID]
+
+With no argument, configure every NPU reported by npu-smi info -l.
+With an ID, configure only that NPU.
+EOF
+}
+
+acltest_parse_device_id() {
+  local script_name=$1
+  shift
+  local device_id=""
+
+  if [[ $# -eq 0 ]]; then
+    printf '\n'
+    return 0
+  fi
+  if [[ $# -eq 1 ]]; then
+    case $1 in
+      --device-id=*) device_id=${1#*=} ;;
+      *) device_id=$1 ;;
+    esac
+  elif [[ $# -eq 2 && ($1 == "--device-id" || $1 == "-i") ]]; then
+    device_id=$2
+  else
+    echo "Invalid arguments." >&2
+    acltest_print_secverify_usage "${script_name}" >&2
+    return 2
+  fi
+  if [[ ! ${device_id} =~ ^[0-9]+$ ]]; then
+    echo "Invalid device ID '${device_id}': expected a non-negative integer." >&2
+    acltest_print_secverify_usage "${script_name}" >&2
+    return 2
+  fi
+  printf '%s\n' "${device_id}"
+}
+
+acltest_set_custom_op_secverify() {
   local target_mode=$1
   local state_description=$2
+  local script_name=$3
+  shift 3
   local npu_smi
+  local npu_id
   local npu_id_list
+  local requested_npu_id
+  local found=0
   local failed=0
   local -a npu_ids=()
 
+  if [[ $# -eq 1 && ($1 == "-h" || $1 == "--help") ]]; then
+    acltest_print_secverify_usage "${script_name}"
+    return 0
+  fi
+  if ! requested_npu_id=$(acltest_parse_device_id "${script_name}" "$@"); then
+    return 2
+  fi
   if [[ ${EUID} -ne 0 ]]; then
     echo "This script must be run as root on the physical host." >&2
     return 1
@@ -69,12 +123,27 @@ acltest_set_all_custom_op_secverify() {
     echo "No NPU IDs were reported by npu-smi info -l." >&2
     return 1
   fi
-  mapfile -t npu_ids <<< "${npu_id_list}"
+  if [[ -n ${requested_npu_id} ]]; then
+    while IFS= read -r npu_id; do
+      if [[ ${npu_id} == "${requested_npu_id}" ]]; then
+        found=1
+        break
+      fi
+    done <<< "${npu_id_list}"
+    if [[ ${found} -eq 0 ]]; then
+      echo "NPU ID ${requested_npu_id} was not reported by npu-smi info -l." >&2
+      echo "Available NPU IDs: ${npu_id_list//$'\n'/ }" >&2
+      return 2
+    fi
+    npu_ids=("${requested_npu_id}")
+  else
+    mapfile -t npu_ids <<< "${npu_id_list}"
+  fi
 
   echo "Target state: ${state_description}"
   echo "Target NPU IDs: ${npu_ids[*]}"
   if [[ ${target_mode} == "0" ]]; then
-    echo "WARNING: signature verification will be disabled on every listed NPU."
+    echo "WARNING: signature verification will be disabled on the selected NPU(s)."
   fi
 
   for npu_id in "${npu_ids[@]}"; do
@@ -99,5 +168,5 @@ acltest_set_all_custom_op_secverify() {
     echo "One or more NPUs could not be configured or verified." >&2
     return 1
   fi
-  echo "All NPUs are configured: ${state_description}"
+  echo "Selected NPU(s) are configured: ${state_description}"
 }

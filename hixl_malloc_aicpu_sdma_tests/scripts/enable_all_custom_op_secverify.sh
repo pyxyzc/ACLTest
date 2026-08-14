@@ -10,4 +10,4 @@ script_dir=$(cd "$(dirname "$0")" && pwd)
 source "${script_dir}/custom_op_secverify_common.sh"
 
 # Mode 5 verifies packages signed by either Huawei or the community certificate.
-acltest_set_all_custom_op_secverify 5 "signature verification enabled (Huawei or community certificate)"
+acltest_set_custom_op_secverify 5 "signature verification enabled (Huawei or community certificate)" "$0" "$@"

@@ -18,6 +18,11 @@
 
 namespace acltest {
 
+enum class HostAddressMode {
+    kDirect,
+    kMapped,
+};
+
 // Conventional single-process ACL memory pair. Host memory is pinned by
 // aclrtMallocHost and device memory is allocated by aclrtMalloc. This class
 // intentionally contains no VMM physical allocation, MapMem, or MemSetAccess.
@@ -28,17 +33,21 @@ public:
     MallocMemoryPair(const MallocMemoryPair &) = delete;
     MallocMemoryPair &operator=(const MallocMemoryPair &) = delete;
 
-    void Initialize(size_t bytes, int32_t logic_device_id);
+    void Initialize(size_t bytes, int32_t logic_device_id, HostAddressMode host_address_mode);
     void Reset() noexcept;
 
     void *host() const { return host_; }
+    void *sdmaHost() const { return sdma_host_; }
     void *device() const { return device_; }
     size_t size() const { return bytes_; }
 
 private:
+    void *host_allocation_ = nullptr;
     void *host_ = nullptr;
+    void *sdma_host_ = nullptr;
     void *device_ = nullptr;
     size_t bytes_ = 0U;
+    bool host_registered_ = false;
 };
 
 }  // namespace acltest

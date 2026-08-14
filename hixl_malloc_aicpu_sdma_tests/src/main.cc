@@ -39,6 +39,7 @@ constexpr uint32_t kDefaultTimeoutMs = 60000U;
 
 struct Options {
     int32_t device_id = 0;
+    HostAddressMode host_address_mode = HostAddressMode::kMapped;
     std::vector<TransferDirection> directions = {
         TransferDirection::kDeviceToHost,
         TransferDirection::kHostToDevice,
@@ -261,10 +262,23 @@ std::vector<TransferDirection> ParseDirections(const std::string &value)
     throw std::invalid_argument("direction must be d2h, h2d, or both");
 }
 
+HostAddressMode ParseHostAddressMode(const std::string &value)
+{
+    if (value == "mapped") { return HostAddressMode::kMapped; }
+    if (value == "direct") { return HostAddressMode::kDirect; }
+    throw std::invalid_argument("host address mode must be mapped or direct");
+}
+
+const char *HostAddressModeName(HostAddressMode mode)
+{
+    return mode == HostAddressMode::kMapped ? "mapped" : "direct";
+}
+
 void PrintUsage(const char *program)
 {
     std::cout << "Usage: " << program << " [options]\n"
               << "  --device N              ACL logical device (default: 0)\n"
+              << "  --host-address-mode M   mapped or direct (default: mapped)\n"
               << "  --direction VALUE       d2h, h2d, or both (default: both)\n"
               << "  --sizes LIST            comma-separated B/K/M/G sizes\n"
               << "                          default: 512B,1K,2K,4K,32K,64K,256K,512K,1M,2M\n"
@@ -291,6 +305,9 @@ Options ParseOptions(int argc, char **argv)
         const std::string name = argument.substr(0U, argument.find('='));
         if (name == "--device") {
             options.device_id = std::stoi(TakeValue(argc, argv, index, argument));
+        } else if (name == "--host-address-mode") {
+            options.host_address_mode =
+                ParseHostAddressMode(TakeValue(argc, argv, index, argument));
         } else if (name == "--direction") {
             options.directions = ParseDirections(TakeValue(argc, argv, index, argument));
         } else if (name == "--sizes") {
@@ -412,9 +429,10 @@ void CheckEqual(const uint8_t *actual, const std::vector<uint8_t> &expected,
     }
 }
 
-void VerifyMethods(MallocMemoryPair &memory, const std::vector<AddressRange> &ranges,
-                   TransferDirection direction, uint64_t io_size, size_t io_count,
-                   BaselineStream &baseline, AicpuBatchLauncher &launcher, uint32_t timeout_ms)
+void VerifyMethods(MallocMemoryPair &memory, const std::vector<AddressRange> &baseline_ranges,
+                   const std::vector<AddressRange> &aicpu_ranges, TransferDirection direction,
+                   uint64_t io_size, size_t io_count, BaselineStream &baseline,
+                   AicpuBatchLauncher &launcher, uint32_t timeout_ms)
 {
     const size_t total_bytes = static_cast<size_t>(CheckedTotalBytes(io_size, io_count));
     const std::vector<uint8_t> pattern = MakePattern(total_bytes, direction, io_size, io_count);
@@ -425,23 +443,23 @@ void VerifyMethods(MallocMemoryPair &memory, const std::vector<AddressRange> &ra
         ACLTEST_CHECK_ACL(aclrtMemcpy(memory.device(), total_bytes, host, total_bytes,
                                       ACL_MEMCPY_HOST_TO_DEVICE));
         std::memset(host, 0, total_bytes);
-        (void)RunMemcpyLoop(ranges, direction, baseline.get(), timeout_ms);
+        (void)RunMemcpyLoop(baseline_ranges, direction, baseline.get(), timeout_ms);
         CheckEqual(host, pattern, "memcpy-loop D2H");
         std::memset(host, 0, total_bytes);
-        (void)RunAicpu(launcher, ranges, direction, timeout_ms);
+        (void)RunAicpu(launcher, aicpu_ranges, direction, timeout_ms);
         CheckEqual(host, pattern, "AICPU batch D2H");
         return;
     }
 
     std::memcpy(host, pattern.data(), total_bytes);
     ACLTEST_CHECK_ACL(aclrtMemset(memory.device(), total_bytes, 0, total_bytes));
-    (void)RunMemcpyLoop(ranges, direction, baseline.get(), timeout_ms);
+    (void)RunMemcpyLoop(baseline_ranges, direction, baseline.get(), timeout_ms);
     std::vector<uint8_t> actual(total_bytes);
     ACLTEST_CHECK_ACL(aclrtMemcpy(actual.data(), total_bytes, memory.device(), total_bytes,
                                   ACL_MEMCPY_DEVICE_TO_HOST));
     CheckEqual(actual.data(), pattern, "memcpy-loop H2D");
     ACLTEST_CHECK_ACL(aclrtMemset(memory.device(), total_bytes, 0, total_bytes));
-    (void)RunAicpu(launcher, ranges, direction, timeout_ms);
+    (void)RunAicpu(launcher, aicpu_ranges, direction, timeout_ms);
     ACLTEST_CHECK_ACL(aclrtMemcpy(actual.data(), total_bytes, memory.device(), total_bytes,
                                   ACL_MEMCPY_DEVICE_TO_HOST));
     CheckEqual(actual.data(), pattern, "AICPU batch H2D");
@@ -475,21 +493,23 @@ ResultRow RunCase(MallocMemoryPair &memory, BaselineStream &baseline, AicpuBatch
     const size_t iterations = options.automatic_iterations
                                   ? ComputeAutoIterations(total_bytes, options.target_bytes)
                                   : options.iterations;
-    const std::vector<AddressRange> ranges =
+    const std::vector<AddressRange> baseline_ranges =
         BuildRanges(memory.host(), memory.device(), io_size, io_count);
+    const std::vector<AddressRange> aicpu_ranges =
+        BuildRanges(memory.sdmaHost(), memory.device(), io_size, io_count);
 
-    VerifyMethods(memory, ranges, direction, io_size, io_count, baseline, launcher,
-                  options.timeout_ms);
+    VerifyMethods(memory, baseline_ranges, aicpu_ranges, direction, io_size, io_count, baseline,
+                  launcher, options.timeout_ms);
     std::cout << "  running " << DirectionName(direction) << " size=" << FormatByteSize(io_size)
               << " count=" << io_count << " iterations=" << iterations << "\n";
 
     for (size_t index = 0U; index < options.warmup; ++index) {
         if ((index & 1U) == 0U) {
-            (void)RunMemcpyLoop(ranges, direction, baseline.get(), options.timeout_ms);
-            (void)RunAicpu(launcher, ranges, direction, options.timeout_ms);
+            (void)RunMemcpyLoop(baseline_ranges, direction, baseline.get(), options.timeout_ms);
+            (void)RunAicpu(launcher, aicpu_ranges, direction, options.timeout_ms);
         } else {
-            (void)RunAicpu(launcher, ranges, direction, options.timeout_ms);
-            (void)RunMemcpyLoop(ranges, direction, baseline.get(), options.timeout_ms);
+            (void)RunAicpu(launcher, aicpu_ranges, direction, options.timeout_ms);
+            (void)RunMemcpyLoop(baseline_ranges, direction, baseline.get(), options.timeout_ms);
         }
     }
 
@@ -500,12 +520,14 @@ ResultRow RunCase(MallocMemoryPair &memory, BaselineStream &baseline, AicpuBatch
     for (size_t index = 0U; index < iterations; ++index) {
         if ((index & 1U) == 0U) {
             memcpy_timings.push_back(
-                RunMemcpyLoop(ranges, direction, baseline.get(), options.timeout_ms));
-            aicpu_timings.push_back(RunAicpu(launcher, ranges, direction, options.timeout_ms));
+                RunMemcpyLoop(baseline_ranges, direction, baseline.get(), options.timeout_ms));
+            aicpu_timings.push_back(
+                RunAicpu(launcher, aicpu_ranges, direction, options.timeout_ms));
         } else {
-            aicpu_timings.push_back(RunAicpu(launcher, ranges, direction, options.timeout_ms));
+            aicpu_timings.push_back(
+                RunAicpu(launcher, aicpu_ranges, direction, options.timeout_ms));
             memcpy_timings.push_back(
-                RunMemcpyLoop(ranges, direction, baseline.get(), options.timeout_ms));
+                RunMemcpyLoop(baseline_ranges, direction, baseline.get(), options.timeout_ms));
         }
     }
 
@@ -592,7 +614,12 @@ int Run(int argc, char **argv)
             (soc_name == nullptr ? "<unknown>" : soc_name));
     }
     std::cout << "device=" << options.device_id << " soc=" << soc_name
+              << " host_address_mode=" << HostAddressModeName(options.host_address_mode)
               << " kernel_json=" << options.kernel_json << '\n';
+    if (options.host_address_mode == HostAddressMode::kDirect) {
+        std::cerr << "warning: direct mode puts the raw Host VA into SDMA SQEs and may timeout; "
+                     "use mapped mode for the supported experiment\n";
+    }
     std::cout << "Timing boundary: submit starts before descriptor allocation/build and ends after "
                  "enqueue; "
                  "e2e ends after stream synchronization. Verification and cleanup are untimed.\n";
@@ -600,7 +627,8 @@ int Run(int argc, char **argv)
     std::vector<ResultRow> results;
     {
         MallocMemoryPair memory;
-        memory.Initialize(static_cast<size_t>(max_total_bytes), options.device_id);
+        memory.Initialize(static_cast<size_t>(max_total_bytes), options.device_id,
+                          options.host_address_mode);
         BaselineStream baseline;
         AicpuBatchLauncher launcher;
         launcher.Initialize(options.device_id, options.kernel_json);

@@ -12,9 +12,15 @@
 - 不调用 `aclrtReserveMemAddress*`、`aclrtMallocPhysical`、`aclrtMapMem`、
   `aclrtMemSetAccess` 或 `aclrtUnmapMem`。
 
-因此，这个工程可以直接验证普通 ACL pinned Host 地址能否被 AICPU 生成的 SDMA SQE
-访问。如果 baseline 正常而 AICPU 路径失败，说明普通 `aclrtMallocHost` 地址不能直接满足
-该 RTSQ/SDMA 路径的寻址要求；这个失败本身就是验证结果，而不是 VMM 初始化问题。
+Host 地址支持两种模式：
+
+- `mapped`（默认）：先用 `aclrtHostMemMapCapabilities` 确认 SDMA 能访问 Host 映射，再通过
+  `aclrtHostRegister` 获取 Device 可访问地址。baseline 仍使用原始 Host 地址，只有 AICPU
+  SDMA 描述符使用映射地址；
+- `direct`：AICPU SDMA 描述符直接使用 `aclrtMallocHost` 返回的 Host 地址，用于复现和
+  对照未映射地址导致的 SDMA/Notify 超时。
+
+`mapped` 只增加 Host 注册，不会回到 Fabric VMM 的 `MapMem/MemSetAccess` 路径。
 
 ## 复用边界
 
@@ -65,6 +71,12 @@ bash scripts/install_kernel.sh --force
 bash scripts/disable_all_custom_op_secverify.sh
 ```
 
+也可以只关闭指定 NPU 的验签：
+
+```bash
+bash scripts/disable_all_custom_op_secverify.sh --device-id 3
+```
+
 脚本按驱动要求为每张卡设置 `custom-op-secverify-enable=1`、
 `custom-op-secverify-mode=0`，并逐卡查询结果。关闭验签会降低主机安全性，测试结束后用
 默认安全模式 `5`（华为证书或社区证书）重新开启所有卡的验签：
@@ -73,15 +85,32 @@ bash scripts/disable_all_custom_op_secverify.sh
 bash scripts/enable_all_custom_op_secverify.sh
 ```
 
+如只需恢复指定 NPU，使用 `bash scripts/enable_all_custom_op_secverify.sh --device-id 3`。
+两个脚本也接受 `-i 3` 或位置参数 `3`；不传参数时仍处理所有 NPU。
+
 两个脚本必须在物理宿主机执行，普通容器或虚拟机中的 `npu-smi` 会拒绝该配置。任一卡
 设置或回读失败时，脚本会继续处理其余卡，并最终返回非零。
 
 ## 运行
 
-默认扫描 D2H/H2D、10 档 IO size、IO count 128：
+默认使用 `mapped` Host 地址，扫描 D2H/H2D、10 档 IO size、IO count 128：
 
 ```bash
 build_out/bin/acl_malloc_copy_bench --csv results.csv
+```
+
+建议先用单向、单尺寸的小用例确认映射后的 SDMA 地址可用：
+
+```bash
+build_out/bin/acl_malloc_copy_bench \
+  --host-address-mode mapped \
+  --direction d2h \
+  --sizes 512B \
+  --counts 1 \
+  --iterations 1 \
+  --warmup 0 \
+  --timeout-ms 5000 \
+  --csv results_smoke.csv
 ```
 
 先做最小验证可以使用：
@@ -95,6 +124,9 @@ build_out/bin/acl_malloc_copy_bench \
   --warmup 1 \
   --csv results_smoke.csv
 ```
+
+需要复现原始 Host VA 路径时，增加 `--host-address-mode direct`。该模式可能在首个
+SDMA 后因 Host 地址不可达而等待 Notify 超时，不用于正式性能数据。
 
 程序会先分别验证 baseline 和 AICPU 结果，再进入计时。提交耗时包含描述符构造、请求
 buffer 分配与上传以及 kernel enqueue；端到端耗时截止到 stream 同步完成。

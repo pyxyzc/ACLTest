@@ -66,6 +66,18 @@ add_executable(malloc_benchmark_logic_test
 target_link_libraries(malloc_benchmark_logic_test PRIVATE acltest_malloc_benchmark_logic)
 add_test(NAME malloc_benchmark_logic_test COMMAND malloc_benchmark_logic_test)
 
+add_executable(malloc_memory_test
+  tests/malloc_memory_test.cc
+  src/malloc_memory.cc)
+target_include_directories(malloc_memory_test PRIVATE
+  ${PROJECT_SOURCE_DIR}/include
+  ${ACLTEST_COMMON_DIR}/include)
+target_compile_features(malloc_memory_test PRIVATE cxx_std_17)
+target_compile_options(malloc_memory_test PRIVATE -Wall -Wextra -Wpedantic)
+target_link_libraries(malloc_memory_test PRIVATE
+  $<BUILD_INTERFACE:acl_rt_headers>)
+add_test(NAME malloc_memory_test COMMAND malloc_memory_test)
+
 install(TARGETS acl_malloc_copy_bench RUNTIME DESTINATION bin)
 
 if(ACLTEST_BUILD_DEVICE)

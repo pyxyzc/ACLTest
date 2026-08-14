@@ -10,4 +10,4 @@ script_dir=$(cd "$(dirname "$0")" && pwd)
 source "${script_dir}/custom_op_secverify_common.sh"
 
 # The enable flag exposes the configuration switch; mode 0 disables verification itself.
-acltest_set_all_custom_op_secverify 0 "signature verification disabled"
+acltest_set_custom_op_secverify 0 "signature verification disabled" "$0" "$@"
