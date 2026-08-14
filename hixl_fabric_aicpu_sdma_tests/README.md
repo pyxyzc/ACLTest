@@ -21,6 +21,8 @@
 保留的关键行为包括：
 
 - Host VMM 映射使用 pinned P2P Host 物理内存，并授予 Device READWRITE 权限；
+- Host 和 Device 物理内存都按完整的 1 GiB VMM 槽申请和映射；
+- 调用 `aclrtMapMem`/`aclrtMemSetAccess` 前显式校验预留 VA 的 2 MiB 对齐；
 - 每个传输描述符对应一个 SDMA SQE，大于 `UINT32_MAX` 的长度先在 Host 拆分；
 - 每次 AICPU launch 最多处理 128 个描述符；
 - 最多累计 1920 个 RTSQ task 后插入 NotifyRecord 并由 control stream 等待；
@@ -30,6 +32,11 @@
 - TransferContext 在 kernel 使用描述符期间加锁，异常清理先停 stream、删除 context，再释放请求 buffer。
 
 这是针对 A3 的验证程序，不是通用 memcpy 替代实现。设备代码直接使用 HAL RTSQ 接口，因此内核配置为 built-in `AICPUKernel`，仅支持以下 A3 SoC 名称：`Ascend910_9391`、`Ascend910_9381`、`Ascend910_9392`、`Ascend910_9382`、`Ascend910_9372`、`Ascend910_9362`。
+
+即使默认 case 的最大有效数据量只有 256 MiB，启动日志中的 `logical_bytes`、
+`host_mapping_bytes` 和 `device_mapping_bytes` 也应全部为 `1073741824`。映射 VA
+必须来自 `aclrtReserveMemAddress*`，不能替换成普通 `malloc` 或
+`aclrtMallocHost` 返回的地址。
 
 ## 构建
 

@@ -14,3 +14,9 @@ g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic \
   "${project_dir}/tests/benchmark_logic_test.cc" \
   -o "${test_dir}/benchmark_logic_test"
 "${test_dir}/benchmark_logic_test"
+
+g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic \
+  -I"${project_dir}/include" \
+  "${project_dir}/tests/fabric_memory_layout_test.cc" \
+  -o "${test_dir}/fabric_memory_layout_test"
+"${test_dir}/fabric_memory_layout_test"

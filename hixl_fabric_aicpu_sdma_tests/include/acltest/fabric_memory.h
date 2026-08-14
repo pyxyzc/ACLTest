@@ -19,9 +19,10 @@
 namespace acltest {
 
 // A compact single-process form of HIXL FabricMemAllocator +
-// VirtualMemoryManager. It reserves two 1-GiB-aligned VMM slots and maps pinned
-// host physical memory and HBM into them. The device access grant on the host
-// mapping is required because the AICPU-generated SDMA SQEs use that VA.
+// VirtualMemoryManager. It reserves two VMM slots, rounds both physical
+// allocations up to complete 1-GiB slots, and maps pinned host memory and HBM
+// into them. The device access grant on the host mapping is required because
+// the AICPU-generated SDMA SQEs use that VA.
 class FabricMemoryPair {
  public:
   FabricMemoryPair() = default;

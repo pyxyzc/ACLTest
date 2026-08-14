@@ -58,6 +58,11 @@ add_executable(benchmark_logic_test tests/benchmark_logic_test.cc)
 target_link_libraries(benchmark_logic_test PRIVATE acltest_benchmark_logic)
 add_test(NAME benchmark_logic_test COMMAND benchmark_logic_test)
 
+add_executable(fabric_memory_layout_test tests/fabric_memory_layout_test.cc)
+target_include_directories(fabric_memory_layout_test PRIVATE ${PROJECT_SOURCE_DIR}/include)
+target_compile_features(fabric_memory_layout_test PRIVATE cxx_std_17)
+add_test(NAME fabric_memory_layout_test COMMAND fabric_memory_layout_test)
+
 install(TARGETS acl_copy_bench RUNTIME DESTINATION bin)
 
 if(ACLTEST_BUILD_DEVICE)

@@ -18,6 +18,7 @@
 #include <string>
 
 #include "acltest/acl_check.h"
+#include "acltest/fabric_memory_layout.h"
 
 extern "C" {
 __attribute__((weak)) aclError aclrtReserveMemAddressNoUCMemory(void **vir_ptr, size_t size, size_t alignment,
@@ -27,19 +28,11 @@ __attribute__((weak)) aclError aclrtReserveMemAddressNoUCMemory(void **vir_ptr, 
 namespace acltest {
 namespace {
 
-constexpr size_t kBlockBytes = 1024ULL * 1024ULL * 1024ULL;
 constexpr uintptr_t kPreferredArenaStart = 40ULL * 1024ULL * 1024ULL * 1024ULL * 1024ULL;
 constexpr uint64_t kHugePageReserveFlag = 1U;
 constexpr int32_t kDevicesPerChip = 4;
 constexpr int32_t kNumaNodeStep = 2;
 constexpr size_t kOneAccessDescriptor = 1U;
-
-size_t RoundUpToBlock(size_t bytes) {
-  if (bytes > std::numeric_limits<size_t>::max() - (kBlockBytes - 1U)) {
-    throw std::overflow_error("fabric memory size cannot be rounded to a 1-GiB VMM slot");
-  }
-  return ((bytes + kBlockBytes - 1U) / kBlockBytes) * kBlockBytes;
-}
 
 size_t RoundUp(size_t bytes, size_t alignment) {
   if (alignment == 0U || bytes == 0U) {
@@ -60,6 +53,19 @@ size_t QueryAlignedSize(const aclrtPhysicalMemProp &property, size_t bytes) {
     throw std::runtime_error("aclrtMemGetAllocationGranularity returned zero");
   }
   return RoundUp(bytes, granularity);
+}
+
+void CheckMapAddressAlignment(const void *address, const char *name) {
+  const uintptr_t value = reinterpret_cast<uintptr_t>(address);
+  if (!IsFabricMapAddressAligned(value)) {
+    throw std::runtime_error(std::string(name) + " is not 2-MiB aligned");
+  }
+}
+
+void CheckMappingSize(size_t mapping_bytes, size_t slot_bytes, const char *name) {
+  if (mapping_bytes != slot_bytes) {
+    throw std::runtime_error(std::string(name) + " does not occupy exactly one 1-GiB fabric slot");
+  }
 }
 
 void LogCleanupError(const char *operation, aclError error) noexcept {
@@ -147,7 +153,7 @@ bool FabricMemoryPair::IsA3Soc() {
 }
 
 void FabricMemoryPair::ReserveArena(size_t bytes) {
-  slot_bytes_ = RoundUpToBlock(bytes);
+  slot_bytes_ = AlignFabricMemorySize(bytes);
   if (slot_bytes_ > std::numeric_limits<size_t>::max() / 2U) {
     throw std::overflow_error("fabric VMM arena size overflows");
   }
@@ -174,11 +180,16 @@ void FabricMemoryPair::Initialize(size_t bytes, int32_t logic_device_id) {
 
   try {
     ReserveArena(bytes);
-    bytes_ = bytes;
-    const PhysicalAllocation host_allocation = AllocateHostPhysical(bytes, logic_device_id);
+    // Fabric VMM uses a complete 1-GiB slot for each side. Keep the physical
+    // allocation, MapMem length, and public logical capacity identical so the
+    // host and device mappings cannot describe different-sized slots.
+    bytes_ = slot_bytes_;
+    const PhysicalAllocation host_allocation = AllocateHostPhysical(slot_bytes_, logic_device_id);
     host_handle_ = host_allocation.handle;
     host_mapping_bytes_ = host_allocation.mapped_bytes;
     host_va_ = arena_va_;
+    CheckMappingSize(host_mapping_bytes_, slot_bytes_, "host mapping");
+    CheckMapAddressAlignment(host_va_, "host fabric VA");
     ACLTEST_CHECK_ACL(aclrtMapMem(host_va_, host_mapping_bytes_, 0U, host_handle_, 0U));
     host_mapped_ = true;
 
@@ -188,13 +199,16 @@ void FabricMemoryPair::Initialize(size_t bytes, int32_t logic_device_id) {
     access.location.id = static_cast<uint32_t>(logic_device_id);
     ACLTEST_CHECK_ACL(aclrtMemSetAccess(host_va_, host_mapping_bytes_, &access, kOneAccessDescriptor));
 
-    const PhysicalAllocation device_allocation = AllocateDevicePhysical(bytes, logic_device_id);
+    const PhysicalAllocation device_allocation = AllocateDevicePhysical(slot_bytes_, logic_device_id);
     device_handle_ = device_allocation.handle;
     device_mapping_bytes_ = device_allocation.mapped_bytes;
     device_va_ = static_cast<uint8_t *>(arena_va_) + slot_bytes_;
+    CheckMappingSize(device_mapping_bytes_, slot_bytes_, "device mapping");
+    CheckMapAddressAlignment(device_va_, "device fabric VA");
     ACLTEST_CHECK_ACL(aclrtMapMem(device_va_, device_mapping_bytes_, 0U, device_handle_, 0U));
     device_mapped_ = true;
-    std::cerr << "fabric memory: logical_bytes=" << bytes_ << ", host_mapping_bytes=" << host_mapping_bytes_
+    std::cerr << "fabric memory: requested_bytes=" << bytes << ", logical_bytes=" << bytes_
+              << ", host_mapping_bytes=" << host_mapping_bytes_
               << ", device_mapping_bytes=" << device_mapping_bytes_ << '\n';
   } catch (...) {
     Reset();
