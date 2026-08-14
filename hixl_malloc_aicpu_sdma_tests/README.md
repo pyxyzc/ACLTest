@@ -58,6 +58,24 @@ bash scripts/install_kernel.sh --force
 和 tar、没有上述登记，Host 仍能下发 kernel，但 Device 侧会因找不到
 `libacltest_malloc_sdma_kernel.so` 报 `errcode:11002, msg:open so failed`。
 
+源码构建的 AICPU 包没有生产环境可信签名。仅在隔离测试机的物理宿主机上，以 root
+用户执行以下脚本，关闭 `npu-smi info -l` 枚举到的所有 NPU 的算子验签：
+
+```bash
+bash scripts/disable_all_custom_op_secverify.sh
+```
+
+脚本按驱动要求为每张卡设置 `custom-op-secverify-enable=1`、
+`custom-op-secverify-mode=0`，并逐卡查询结果。关闭验签会降低主机安全性，测试结束后用
+默认安全模式 `5`（华为证书或社区证书）重新开启所有卡的验签：
+
+```bash
+bash scripts/enable_all_custom_op_secverify.sh
+```
+
+两个脚本必须在物理宿主机执行，普通容器或虚拟机中的 `npu-smi` 会拒绝该配置。任一卡
+设置或回读失败时，脚本会继续处理其余卡，并最终返回非零。
+
 ## 运行
 
 默认扫描 D2H/H2D、10 档 IO size、IO count 128：
