@@ -11,10 +11,13 @@ force=0
 
 # shellcheck disable=SC1091
 source "${project_dir}/scripts/ascend_env.sh"
+# shellcheck disable=SC1091
+source "${project_dir}/scripts/package_registration.sh"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --ascend-home)
+      [[ $# -ge 2 ]] || { echo "--ascend-home requires a path" >&2; exit 2; }
       ascend_home="$2"
       shift 2
       ;;
@@ -34,8 +37,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "${ascend_home}" ]]; then
-  ascend_home="$(acltest_find_ascend_home)" || {
-    echo "CANN was not found under /usr/local/Ascend; pass --ascend-home or set ASCEND_HOME_PATH." >&2
+  ascend_home=$(acltest_find_ascend_home) || {
+    echo "CANN was not found; pass --ascend-home or set ASCEND_HOME_PATH." >&2
     exit 1
   }
 fi
@@ -44,9 +47,14 @@ json_source="${source_root}/config/libacltest_sdma_kernel.json"
 archive_source="${source_root}/kernel/acltest-sdma-compat.tar.gz"
 json_target="${ascend_home}/opp/built-in/op_impl/aicpu/config/libacltest_sdma_kernel.json"
 archive_target="${ascend_home}/opp/built-in/op_impl/aicpu/kernel/acltest-sdma-compat.tar.gz"
+package_config=$(acltest_fabric_package_config_path "${ascend_home}")
 
 [[ -f "${json_source}" ]] || { echo "Missing ${json_source}; run ./build.sh first." >&2; exit 1; }
 [[ -f "${archive_source}" ]] || { echo "Missing ${archive_source}; run ./build.sh first." >&2; exit 1; }
+[[ -f "${package_config}" ]] || {
+  echo "Missing ${package_config}; this CANN installation cannot deploy a custom built-in AICPU package." >&2
+  exit 1
+}
 if [[ ${force} -eq 0 && ( -e "${json_target}" || -e "${archive_target}" ) ]]; then
   echo "AclTest kernel files already exist. Use --force to replace only these two uniquely named files." >&2
   exit 1
@@ -57,3 +65,5 @@ install -m 0444 "${json_source}" "${json_target}"
 install -m 0444 "${archive_source}" "${archive_target}"
 echo "Installed ${json_target}"
 echo "Installed ${archive_target}"
+acltest_fabric_register_package "${ascend_home}"
+echo "Restart the benchmark process so TSD reloads the updated package configuration."

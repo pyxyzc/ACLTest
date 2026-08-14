@@ -12,6 +12,8 @@ ascend_home="${ASCEND_HOME_PATH:-}"
 
 # shellcheck disable=SC1091
 source "${project_dir}/scripts/ascend_env.sh"
+# shellcheck disable=SC1091
+source "${project_dir}/scripts/package_registration.sh"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -45,4 +47,5 @@ fi
 json_target="${ascend_home}/opp/built-in/op_impl/aicpu/config/libacltest_sdma_kernel.json"
 archive_target="${ascend_home}/opp/built-in/op_impl/aicpu/kernel/acltest-sdma-compat.tar.gz"
 rm -f -- "${json_target}" "${archive_target}"
+acltest_fabric_unregister_package "${ascend_home}"
 echo "Removed AclTest kernel files from ${ascend_home}; HIXL files were untouched."

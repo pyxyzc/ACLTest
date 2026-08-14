@@ -63,6 +63,9 @@ target_include_directories(fabric_memory_layout_test PRIVATE ${PROJECT_SOURCE_DI
 target_compile_features(fabric_memory_layout_test PRIVATE cxx_std_17)
 add_test(NAME fabric_memory_layout_test COMMAND fabric_memory_layout_test)
 
+add_test(NAME package_registration_test
+  COMMAND bash ${PROJECT_SOURCE_DIR}/tests/package_registration_test.sh)
+
 install(TARGETS acl_copy_bench RUNTIME DESTINATION bin)
 
 if(ACLTEST_BUILD_DEVICE)

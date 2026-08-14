@@ -73,13 +73,21 @@ bash scripts/install_kernel.sh
 bash scripts/install_kernel.sh --ascend-home /path/to/cann
 ```
 
-已有同名 AclTest 文件时脚本默认拒绝覆盖；确认要替换时显式加 `--force`。卸载只删除这两个 AclTest 文件：
+已有同名 AclTest 文件时脚本默认拒绝覆盖；确认要替换时显式加 `--force`。卸载只删除这两个
+AclTest 文件及本工程拥有的包登记块：
 
 ```bash
 bash scripts/uninstall_kernel.sh
 ```
 
-清理本工程的 `build/`、`build_out/` 和已安装的两个 AclTest 文件：
+安装脚本还会在当前 CANN 的 `conf/ascend_package_load.ini` 中登记
+`acltest-sdma-compat.tar.gz`。这一步用于让 TSD 在业务进程启动时把归档发送并解压到
+Device；如果只复制 JSON 和 tar 而不登记，Host 可以下发 kernel，但 Device 侧会因找不到
+`libacltest_sdma_kernel.so` 报 `errcode:11002, msg:open so failed`。登记内容使用
+`ACLTEST_FABRIC_AICPU_SDMA` 专用标记，重复安装不会重复追加，卸载和清理只移除该标记块，
+不会修改 CANN 自带的 HIXL/Fabric 包配置。安装后应重新启动 benchmark 进程。
+
+清理本工程的 `build/`、`build_out/`、已安装的两个 AclTest 文件和包登记块：
 
 ```bash
 bash scripts/clear.sh
