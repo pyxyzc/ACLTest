@@ -1,0 +1,9 @@
+<!--
+Copyright (c) 2026 Huawei Technologies Co., Ltd.
+Licensed under the CANN Open Software License Agreement Version 2.0.
+See LICENSE in the root of the software repository for the full text.
+-->
+<acltest_check_cfg>
+  <item input="acltest-malloc-sdma-compat.tar.gz" output="acltest-malloc-sdma-compat.tar.gz" type="cms"
+        sign_alg="PSS" tag="ascend_aicpu" nvcnt="0"></item>
+</acltest_check_cfg>

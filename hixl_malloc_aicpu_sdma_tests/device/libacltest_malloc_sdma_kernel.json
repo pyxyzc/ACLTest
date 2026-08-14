@@ -1,0 +1,23 @@
+{
+  "AclTestSdmaBatchRead": {
+    "opInfo": {
+      "functionName": "AclTestSdmaBatchRead",
+      "kernelSo": "libacltest_malloc_sdma_kernel.so",
+      "opKernelLib": "AICPUKernel"
+    }
+  },
+  "AclTestSdmaBatchWrite": {
+    "opInfo": {
+      "functionName": "AclTestSdmaBatchWrite",
+      "kernelSo": "libacltest_malloc_sdma_kernel.so",
+      "opKernelLib": "AICPUKernel"
+    }
+  },
+  "AclTestSyncTransferContext": {
+    "opInfo": {
+      "functionName": "AclTestSyncTransferContext",
+      "kernelSo": "libacltest_malloc_sdma_kernel.so",
+      "opKernelLib": "AICPUKernel"
+    }
+  }
+}
