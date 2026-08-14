@@ -1,5 +1,4 @@
 #include <acl/acl.h>
-
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
@@ -32,22 +31,14 @@ struct Options {
 std::string AclErrorHint(aclError ret)
 {
     switch (ret) {
-        case ACL_SUCCESS:
-            return "ACL_SUCCESS";
-        case ACL_ERROR_REPEAT_INITIALIZE:
-            return "ACL_ERROR_REPEAT_INITIALIZE";
-        case ACL_ERROR_RT_PARAM_INVALID:
-            return "ACL_ERROR_RT_PARAM_INVALID";
-        case ACL_ERROR_RT_FEATURE_NOT_SUPPORT:
-            return "ACL_ERROR_RT_FEATURE_NOT_SUPPORT";
-        case ACL_ERROR_RT_NO_DEVICE:
-            return "ACL_ERROR_RT_NO_DEVICE";
-        case 507910:
-            return "ACL_ERROR_HOST_MEMORY_ALREADY_REGISTERED";
-        case 507911:
-            return "ACL_ERROR_HOST_MEMORY_NOT_REGISTERED";
-        default:
-            return "unknown";
+        case ACL_SUCCESS: return "ACL_SUCCESS";
+        case ACL_ERROR_REPEAT_INITIALIZE: return "ACL_ERROR_REPEAT_INITIALIZE";
+        case ACL_ERROR_RT_PARAM_INVALID: return "ACL_ERROR_RT_PARAM_INVALID";
+        case ACL_ERROR_RT_FEATURE_NOT_SUPPORT: return "ACL_ERROR_RT_FEATURE_NOT_SUPPORT";
+        case ACL_ERROR_RT_NO_DEVICE: return "ACL_ERROR_RT_NO_DEVICE";
+        case 507910: return "ACL_ERROR_HOST_MEMORY_ALREADY_REGISTERED";
+        case 507911: return "ACL_ERROR_HOST_MEMORY_NOT_REGISTERED";
+        default: return "unknown";
     }
 }
 
@@ -61,21 +52,13 @@ std::string FormatAclRet(aclError ret)
 std::string FlagsToString(uint32_t flags)
 {
     std::vector<std::string> names;
-    if ((flags & ACL_HOST_REG_MAPPED) != 0U) {
-        names.emplace_back("ACL_HOST_REG_MAPPED");
-    }
-    if ((flags & ACL_HOST_REG_PINNED) != 0U) {
-        names.emplace_back("ACL_HOST_REG_PINNED");
-    }
-    if (names.empty()) {
-        return std::to_string(flags);
-    }
+    if ((flags & ACL_HOST_REG_MAPPED) != 0U) { names.emplace_back("ACL_HOST_REG_MAPPED"); }
+    if ((flags & ACL_HOST_REG_PINNED) != 0U) { names.emplace_back("ACL_HOST_REG_PINNED"); }
+    if (names.empty()) { return std::to_string(flags); }
 
     std::ostringstream os;
     for (size_t i = 0; i < names.size(); ++i) {
-        if (i != 0U) {
-            os << " | ";
-        }
+        if (i != 0U) { os << " | "; }
         os << names[i];
     }
     os << " (" << flags << ")";
@@ -84,25 +67,23 @@ std::string FlagsToString(uint32_t flags)
 
 void PrintUsage(const char* program)
 {
-    std::cout
-        << "Usage: " << program << " [options]\n"
-        << "\n"
-        << "Options:\n"
-        << "  --device0 N       First Ascend device id. Default: 0\n"
-        << "  --device1 N       Second Ascend device id. Default: 1\n"
-        << "  --size BYTES      Host buffer size. Default: 4096\n"
-        << "  --flags HEX       aclrtHostRegisterV2 flag value. Default: 0x10000002\n"
-        << "  --help            Show this help.\n"
-        << "\n"
-        << "The default flags are ACL_HOST_REG_MAPPED | ACL_HOST_REG_PINNED.\n";
+    std::cout << "Usage: " << program << " [options]\n"
+              << "\n"
+              << "Options:\n"
+              << "  --device0 N       First Ascend device id. Default: 0\n"
+              << "  --device1 N       Second Ascend device id. Default: 1\n"
+              << "  --size BYTES      Host buffer size. Default: 4096\n"
+              << "  --flags HEX       aclrtHostRegisterV2 flag value. Default: 0x10000002\n"
+              << "  --help            Show this help.\n"
+              << "\n"
+              << "The default flags are ACL_HOST_REG_MAPPED | ACL_HOST_REG_PINNED.\n";
 }
 
 bool ParseInt(const char* text, int* out)
 {
     char* end = nullptr;
     const long value = std::strtol(text, &end, 0);
-    if (end == text || *end != '\0' || value < 0 ||
-        value > std::numeric_limits<int>::max()) {
+    if (end == text || *end != '\0' || value < 0 || value > std::numeric_limits<int>::max()) {
         return false;
     }
     *out = static_cast<int>(value);
@@ -113,9 +94,7 @@ bool ParseSize(const char* text, size_t* out)
 {
     char* end = nullptr;
     const unsigned long long value = std::strtoull(text, &end, 0);
-    if (end == text || *end != '\0' || value == 0ULL) {
-        return false;
-    }
+    if (end == text || *end != '\0' || value == 0ULL) { return false; }
     *out = static_cast<size_t>(value);
     return true;
 }
@@ -124,8 +103,7 @@ bool ParseU32(const char* text, uint32_t* out)
 {
     char* end = nullptr;
     const unsigned long value = std::strtoul(text, &end, 0);
-    if (end == text || *end != '\0' ||
-        value > std::numeric_limits<uint32_t>::max()) {
+    if (end == text || *end != '\0' || value > std::numeric_limits<uint32_t>::max()) {
         return false;
     }
     *out = static_cast<uint32_t>(value);
@@ -149,24 +127,16 @@ bool ParseArgs(int argc, char** argv, Options* options)
             std::exit(0);
         } else if (arg == "--device0") {
             const char* value = require_value("--device0");
-            if (value == nullptr || !ParseInt(value, &options->device0)) {
-                return false;
-            }
+            if (value == nullptr || !ParseInt(value, &options->device0)) { return false; }
         } else if (arg == "--device1") {
             const char* value = require_value("--device1");
-            if (value == nullptr || !ParseInt(value, &options->device1)) {
-                return false;
-            }
+            if (value == nullptr || !ParseInt(value, &options->device1)) { return false; }
         } else if (arg == "--size") {
             const char* value = require_value("--size");
-            if (value == nullptr || !ParseSize(value, &options->size)) {
-                return false;
-            }
+            if (value == nullptr || !ParseSize(value, &options->size)) { return false; }
         } else if (arg == "--flags") {
             const char* value = require_value("--flags");
-            if (value == nullptr || !ParseU32(value, &options->flags)) {
-                return false;
-            }
+            if (value == nullptr || !ParseU32(value, &options->flags)) { return false; }
         } else {
             std::cerr << "Unknown option: " << arg << "\n";
             return false;
@@ -186,10 +156,7 @@ public:
         }
     }
 
-    ~PageAlignedHostBuffer()
-    {
-        std::free(ptr_);
-    }
+    ~PageAlignedHostBuffer() { std::free(ptr_); }
 
     PageAlignedHostBuffer(const PageAlignedHostBuffer&) = delete;
     PageAlignedHostBuffer& operator=(const PageAlignedHostBuffer&) = delete;
@@ -230,9 +197,7 @@ public:
         for (auto it = devices_set_.rbegin(); it != devices_set_.rend(); ++it) {
             (void)aclrtResetDevice(*it);
         }
-        if (initialized_here_) {
-            (void)aclFinalize();
-        }
+        if (initialized_here_) { (void)aclFinalize(); }
     }
 
 private:
@@ -256,8 +221,8 @@ RegisterResult RegisterCurrentDevice(const char* label, void* host, size_t size,
     if (result.registered && ((flags & ACL_HOST_REG_MAPPED) != 0U)) {
         void* device_ptr = nullptr;
         const aclError map_ret = aclrtHostGetDevicePointer(host, &device_ptr, 0);
-        std::cout << "  " << label << " get-device-pointer ret="
-                  << FormatAclRet(map_ret) << ", device_ptr=" << device_ptr << "\n";
+        std::cout << "  " << label << " get-device-pointer ret=" << FormatAclRet(map_ret)
+                  << ", device_ptr=" << device_ptr << "\n";
     }
     return result;
 }
@@ -265,11 +230,9 @@ RegisterResult RegisterCurrentDevice(const char* label, void* host, size_t size,
 bool UnregisterOnDevice(AclRuntime& runtime, int device, const char* label, void* host)
 {
     const aclError set_ret = runtime.SetDevice(device);
-    std::cout << "  " << label << " set-device(" << device << ") ret="
-              << FormatAclRet(set_ret) << "\n";
-    if (set_ret != ACL_SUCCESS) {
-        return false;
-    }
+    std::cout << "  " << label << " set-device(" << device << ") ret=" << FormatAclRet(set_ret)
+              << "\n";
+    if (set_ret != ACL_SUCCESS) { return false; }
 
     const aclError ret = aclrtHostUnregister(host);
     std::cout << "  " << label << " unregister ret=" << FormatAclRet(ret) << "\n";
@@ -289,20 +252,16 @@ bool RunCrossDeviceWithoutUnregister(AclRuntime& runtime, const Options& options
     std::cout << "  host=" << host.data() << ", size=" << host.size() << "\n";
 
     aclError set_ret = runtime.SetDevice(options.device0);
-    std::cout << "  first set-device(" << options.device0 << ") ret="
-              << FormatAclRet(set_ret) << "\n";
-    if (set_ret != ACL_SUCCESS) {
-        return false;
-    }
+    std::cout << "  first set-device(" << options.device0 << ") ret=" << FormatAclRet(set_ret)
+              << "\n";
+    if (set_ret != ACL_SUCCESS) { return false; }
     const RegisterResult first =
         RegisterCurrentDevice("first/device0", host.data(), host.size(), options.flags);
-    if (!first.registered) {
-        return false;
-    }
+    if (!first.registered) { return false; }
 
     set_ret = runtime.SetDevice(options.device1);
-    std::cout << "  second set-device(" << options.device1 << ") ret="
-              << FormatAclRet(set_ret) << "\n";
+    std::cout << "  second set-device(" << options.device1 << ") ret=" << FormatAclRet(set_ret)
+              << "\n";
     if (set_ret != ACL_SUCCESS) {
         UnregisterOnDevice(runtime, options.device0, "cleanup/device0", host.data());
         return false;
@@ -331,28 +290,22 @@ bool RunCrossDeviceAfterUnregister(AclRuntime& runtime, const Options& options)
     std::cout << "  host=" << host.data() << ", size=" << host.size() << "\n";
 
     aclError set_ret = runtime.SetDevice(options.device0);
-    std::cout << "  first set-device(" << options.device0 << ") ret="
-              << FormatAclRet(set_ret) << "\n";
-    if (set_ret != ACL_SUCCESS) {
-        return false;
-    }
+    std::cout << "  first set-device(" << options.device0 << ") ret=" << FormatAclRet(set_ret)
+              << "\n";
+    if (set_ret != ACL_SUCCESS) { return false; }
 
     const RegisterResult first =
         RegisterCurrentDevice("first/device0", host.data(), host.size(), options.flags);
-    if (!first.registered) {
-        return false;
-    }
+    if (!first.registered) { return false; }
 
     if (!UnregisterOnDevice(runtime, options.device0, "between/device0", host.data())) {
         return false;
     }
 
     set_ret = runtime.SetDevice(options.device1);
-    std::cout << "  second set-device(" << options.device1 << ") ret="
-              << FormatAclRet(set_ret) << "\n";
-    if (set_ret != ACL_SUCCESS) {
-        return false;
-    }
+    std::cout << "  second set-device(" << options.device1 << ") ret=" << FormatAclRet(set_ret)
+              << "\n";
+    if (set_ret != ACL_SUCCESS) { return false; }
 
     const RegisterResult second =
         RegisterCurrentDevice("second/device1", host.data(), host.size(), options.flags);
@@ -363,11 +316,10 @@ bool RunCrossDeviceAfterUnregister(AclRuntime& runtime, const Options& options)
     return true;
 }
 
-bool RunCrossDeviceSamePointer(AclRuntime& runtime, const Options& options,
-                               uint32_t device_count)
+bool RunCrossDeviceSamePointer(AclRuntime& runtime, const Options& options, uint32_t device_count)
 {
-    std::cout << "\n[case1] same process, same host pointer, device "
-              << options.device0 << " then device " << options.device1 << "\n";
+    std::cout << "\n[case1] same process, same host pointer, device " << options.device0
+              << " then device " << options.device1 << "\n";
 
     if (options.device0 >= static_cast<int>(device_count) ||
         options.device1 >= static_cast<int>(device_count)) {
@@ -394,17 +346,12 @@ bool RunDuplicateRegisterWithoutUnregister(AclRuntime& runtime, const Options& o
     std::cout << "  host=" << host.data() << ", size=" << host.size() << "\n";
 
     aclError set_ret = runtime.SetDevice(options.device0);
-    std::cout << "  set-device(" << options.device0 << ") ret="
-              << FormatAclRet(set_ret) << "\n";
-    if (set_ret != ACL_SUCCESS) {
-        return false;
-    }
+    std::cout << "  set-device(" << options.device0 << ") ret=" << FormatAclRet(set_ret) << "\n";
+    if (set_ret != ACL_SUCCESS) { return false; }
 
     const RegisterResult first =
         RegisterCurrentDevice("first", host.data(), host.size(), options.flags);
-    if (!first.registered) {
-        return false;
-    }
+    if (!first.registered) { return false; }
 
     const RegisterResult second =
         RegisterCurrentDevice("second", host.data(), host.size(), options.flags);
@@ -429,17 +376,12 @@ bool RunDuplicateRegisterAfterUnregister(AclRuntime& runtime, const Options& opt
     std::cout << "  host=" << host.data() << ", size=" << host.size() << "\n";
 
     aclError set_ret = runtime.SetDevice(options.device0);
-    std::cout << "  set-device(" << options.device0 << ") ret="
-              << FormatAclRet(set_ret) << "\n";
-    if (set_ret != ACL_SUCCESS) {
-        return false;
-    }
+    std::cout << "  set-device(" << options.device0 << ") ret=" << FormatAclRet(set_ret) << "\n";
+    if (set_ret != ACL_SUCCESS) { return false; }
 
     const RegisterResult first =
         RegisterCurrentDevice("first", host.data(), host.size(), options.flags);
-    if (!first.registered) {
-        return false;
-    }
+    if (!first.registered) { return false; }
 
     if (!UnregisterOnDevice(runtime, options.device0, "between/first", host.data())) {
         return false;
@@ -487,20 +429,16 @@ int main(int argc, char** argv)
     AclRuntime runtime;
     const aclError init_ret = runtime.Init();
     std::cout << "aclInit ret=" << FormatAclRet(init_ret) << "\n";
-    if (init_ret != ACL_SUCCESS) {
-        return 1;
-    }
+    if (init_ret != ACL_SUCCESS) { return 1; }
 
     const char* soc_name = aclrtGetSocName();
     std::cout << "soc=" << (soc_name == nullptr ? "unknown" : soc_name) << "\n";
 
     uint32_t device_count = 0;
     const aclError count_ret = aclrtGetDeviceCount(&device_count);
-    std::cout << "aclrtGetDeviceCount ret=" << FormatAclRet(count_ret)
-              << ", count=" << device_count << "\n";
-    if (count_ret != ACL_SUCCESS || device_count == 0U) {
-        return 1;
-    }
+    std::cout << "aclrtGetDeviceCount ret=" << FormatAclRet(count_ret) << ", count=" << device_count
+              << "\n";
+    if (count_ret != ACL_SUCCESS || device_count == 0U) { return 1; }
 
     bool ok = true;
     ok = RunCrossDeviceSamePointer(runtime, options, device_count) && ok;

@@ -1,10 +1,9 @@
 #pragma once
 
-#include "physical_memory_common.h"
-
 #include <cstdint>
 #include <string>
 #include <vector>
+#include "physical_memory_common.h"
 
 #ifndef ACLTEST_HAS_FABRIC_SHARE_TYPE
 #define ACLTEST_HAS_FABRIC_SHARE_TYPE 0
@@ -45,8 +44,7 @@ bool LogAcl(const std::string& label, aclError ret);
 
 PhysicalMemoryConfig MakeDeviceConfig(const Options& options);
 PhysicalMemoryConfig MakeHostConfig(const Options& options);
-bool QueryAlignedSize(const PhysicalMemoryConfig& config, size_t requested,
-                      size_t* aligned);
+bool QueryAlignedSize(const PhysicalMemoryConfig& config, size_t requested, size_t* aligned);
 
 std::vector<uint8_t> MakePattern(size_t size, uint32_t seed);
 

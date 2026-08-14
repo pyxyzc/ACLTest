@@ -1,19 +1,15 @@
 #include "physical_memory_ipc_parent.h"
-
-#include "physical_memory_ipc_endpoint.h"
-
-#include "console_utils.h"
-
-#include <sys/wait.h>
-#include <unistd.h>
-
 #include <array>
 #include <cerrno>
 #include <csignal>
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include <sys/wait.h>
+#include <unistd.h>
 #include <vector>
+#include "console_utils.h"
+#include "physical_memory_ipc_endpoint.h"
 
 namespace acltest::internal {
 namespace {
@@ -31,8 +27,7 @@ struct IpcDirection {
     uint32_t seed = 0;
 };
 
-bool AddImportedHandle(const Options& options, IpcEndpointKind endpoint,
-                       ShareMsg* share_msg,
+bool AddImportedHandle(const Options& options, IpcEndpointKind endpoint, ShareMsg* share_msg,
                        std::array<ParentHandle, kMaxSharedHandleCount>* handles,
                        uint32_t* handle_index)
 {
@@ -51,28 +46,21 @@ bool AddImportedHandle(const Options& options, IpcEndpointKind endpoint,
     ParentHandle& handle = (*handles)[index];
     handle.memory_kind = ImportedMemoryKind(endpoint);
     handle.config = MakeConfigForKind(options, handle.memory_kind);
-    if (!QueryAlignedSize(handle.config, options.requested_size,
-                          &handle.aligned_size) ||
-        !AllocateAndMapPhysical(handle.config, handle.aligned_size,
-                                &handle.mapping)) {
+    if (!QueryAlignedSize(handle.config, options.requested_size, &handle.aligned_size) ||
+        !AllocateAndMapPhysical(handle.config, handle.aligned_size, &handle.mapping)) {
         return false;
     }
 
     share_msg->handle_memory_kinds[index] = static_cast<uint32_t>(handle.memory_kind);
     share_msg->handle_aligned_sizes[index] = handle.aligned_size;
-    if (share_msg->aligned_size == 0U) {
-        share_msg->aligned_size = handle.aligned_size;
-    }
+    if (share_msg->aligned_size == 0U) { share_msg->aligned_size = handle.aligned_size; }
     return true;
 }
 
-bool SetupImportedSource(const Options& options, const IpcDirection& direction,
-                         ShareMsg* share_msg,
+bool SetupImportedSource(const Options& options, const IpcDirection& direction, ShareMsg* share_msg,
                          std::array<ParentHandle, kMaxSharedHandleCount>* handles)
 {
-    if (!IsImportedEndpoint(direction.src)) {
-        return true;
-    }
+    if (!IsImportedEndpoint(direction.src)) { return true; }
     if (!ValidImportedIndex(share_msg->src_handle_index, *share_msg)) {
         std::cerr << "  invalid source handle index for parent setup\n";
         return false;
@@ -80,19 +68,17 @@ bool SetupImportedSource(const Options& options, const IpcDirection& direction,
 
     ParentHandle& source = (*handles)[share_msg->src_handle_index];
     const auto pattern = MakePattern(options.requested_size, direction.seed);
-    return CopyHostToMapping(
-        source.mapping.virt, source.mapping.size, pattern, source.config,
-        "parent setup aclrtMemcpy(host buffer -> " +
-            std::string(EndpointName(direction.src)) + ")");
+    return CopyHostToMapping(source.mapping.virt, source.mapping.size, pattern, source.config,
+                             "parent setup aclrtMemcpy(host buffer -> " +
+                                 std::string(EndpointName(direction.src)) + ")");
 }
 
-bool ExportParentHandles(const Options& options, int32_t child_bare_tgid,
-                         ShareMsg* share_msg,
+bool ExportParentHandles(const Options& options, int32_t child_bare_tgid, ShareMsg* share_msg,
                          std::array<ParentHandle, kMaxSharedHandleCount>* handles)
 {
     for (uint32_t i = 0; i < share_msg->handle_count; ++i) {
-        if (!ExportShareableHandle(options, (*handles)[i].mapping.handle,
-                                   child_bare_tgid, &share_msg->handles[i])) {
+        if (!ExportShareableHandle(options, (*handles)[i].mapping.handle, child_bare_tgid,
+                                   &share_msg->handles[i])) {
             return false;
         }
     }
@@ -103,9 +89,7 @@ bool VerifyImportedDestination(const Options& options, const IpcDirection& direc
                                const ShareMsg& share_msg,
                                std::array<ParentHandle, kMaxSharedHandleCount>* handles)
 {
-    if (!IsImportedEndpoint(direction.dst)) {
-        return true;
-    }
+    if (!IsImportedEndpoint(direction.dst)) { return true; }
     if (!ValidImportedIndex(share_msg.dst_handle_index, share_msg)) {
         std::cerr << "  invalid destination handle index for parent readback\n";
         return false;
@@ -113,16 +97,14 @@ bool VerifyImportedDestination(const Options& options, const IpcDirection& direc
 
     ParentHandle& destination = (*handles)[share_msg.dst_handle_index];
     std::vector<uint8_t> actual(options.requested_size);
-    return CopyMappingToHost(
-               &actual, destination.mapping.virt, actual.size(), destination.config,
-               "parent readback aclrtMemcpy(" +
-                   std::string(EndpointName(direction.dst)) + " -> host buffer)") &&
-           VerifyPattern(actual, direction.seed,
-                         DirectionName(direction.src, direction.dst));
+    return CopyMappingToHost(&actual, destination.mapping.virt, actual.size(), destination.config,
+                             "parent readback aclrtMemcpy(" +
+                                 std::string(EndpointName(direction.dst)) + " -> host buffer)") &&
+           VerifyPattern(actual, direction.seed, DirectionName(direction.src, direction.dst));
 }
 
-void CleanupParentHandles(
-    std::array<ParentHandle, kMaxSharedHandleCount>* handles, uint32_t handle_count)
+void CleanupParentHandles(std::array<ParentHandle, kMaxSharedHandleCount>* handles,
+                          uint32_t handle_count)
 {
     for (uint32_t i = 0; i < handle_count && i < kMaxSharedHandleCount; ++i) {
         (*handles)[i].mapping.Cleanup();
@@ -191,8 +173,7 @@ bool RunIpcCopyDirection(const Options& options, IpcEndpointKind source,
 
     bool ok = true;
     ChildPidMsg pid_msg;
-    if (!ReadFull(child_to_parent[0], &pid_msg, sizeof(pid_msg)) ||
-        pid_msg.magic != kPidMagic) {
+    if (!ReadFull(child_to_parent[0], &pid_msg, sizeof(pid_msg)) || pid_msg.magic != kPidMagic) {
         std::cerr << "  parent failed to read child bare tgid\n";
         ok = false;
     } else {
@@ -224,20 +205,16 @@ bool RunIpcCopyDirection(const Options& options, IpcEndpointKind source,
 
     if (ok) {
         ok = WriteFull(parent_to_child[1], &share_msg, sizeof(share_msg));
-        if (!ok) {
-            std::cerr << "  parent failed to send copy-direction share msg\n";
-        }
+        if (!ok) { std::cerr << "  parent failed to send copy-direction share msg\n"; }
     } else if (parent_to_child[1] >= 0) {
         SendStopMessage(parent_to_child[1]);
     }
     CloseFd(&parent_to_child[1]);
 
     ChildResult result;
-    if (ReadFull(child_to_parent[0], &result, sizeof(result)) &&
-        result.magic == kResultMagic) {
-        std::cout << "  child_result ok=" << result.ok
-                  << ", ret=" << result.ret
-                  << ", message=\"" << result.message << "\"\n";
+    if (ReadFull(child_to_parent[0], &result, sizeof(result)) && result.magic == kResultMagic) {
+        std::cout << "  child_result ok=" << result.ok << ", ret=" << result.ret << ", message=\""
+                  << result.message << "\"\n";
         ok = ok && result.ok == 1;
     } else {
         std::cerr << "  parent failed to read child result\n";
@@ -246,9 +223,7 @@ bool RunIpcCopyDirection(const Options& options, IpcEndpointKind source,
     CloseFd(&child_to_parent[0]);
 
     ok = ok && VerifyImportedDestination(options, direction, share_msg, &handles);
-    if (!ok && !IsImportedEndpoint(direction.dst)) {
-        PrintRed("  " + direction_name + " ×");
-    }
+    if (!ok && !IsImportedEndpoint(direction.dst)) { PrintRed("  " + direction_name + " ×"); }
 
     CleanupParentHandles(&handles, share_msg.handle_count);
     return WaitForChild(pid, ok);

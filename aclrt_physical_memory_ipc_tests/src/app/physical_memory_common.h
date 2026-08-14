@@ -1,7 +1,6 @@
 #pragma once
 
 #include <acl/acl.h>
-
 #include <cstddef>
 
 namespace acltest {
@@ -32,8 +31,8 @@ enum class StartupDisplayMode {
     SingleProcessBanner,
 };
 
-int RunTestProgram(int argc, char** argv, const char* title,
-                   const TestCase* tests, size_t test_count,
+int RunTestProgram(int argc, char** argv, const char* title, const TestCase* tests,
+                   size_t test_count,
                    StartupDisplayMode display_mode = StartupDisplayMode::Default);
 
 bool RunSingleProcessVmmTest(const Options& options);

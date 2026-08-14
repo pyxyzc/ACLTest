@@ -1,15 +1,10 @@
 #include "physical_memory_copy.h"
-
-#include "console_utils.h"
-
 #include <iostream>
+#include "console_utils.h"
 
 namespace acltest::internal {
 
-DeviceBuffer::~DeviceBuffer()
-{
-    Cleanup();
-}
+DeviceBuffer::~DeviceBuffer() { Cleanup(); }
 
 bool DeviceBuffer::Allocate(size_t bytes)
 {
@@ -21,9 +16,7 @@ bool DeviceBuffer::Allocate(size_t bytes)
 
 void DeviceBuffer::Cleanup()
 {
-    if (!allocated_ || ptr == nullptr) {
-        return;
-    }
+    if (!allocated_ || ptr == nullptr) { return; }
     (void)LogAcl("cleanup aclrtFree(device buffer)", aclrtFree(ptr));
     ptr = nullptr;
     size = 0;
@@ -47,16 +40,13 @@ aclrtMemcpyKind CopyKind(const Endpoint& dst, const Endpoint& src)
 bool CopyEndpoint(const Endpoint& dst, const Endpoint& src, size_t copy_size,
                   const std::string& label)
 {
-    return CopyWithKind(dst.ptr, dst.size, src.ptr, copy_size, CopyKind(dst, src),
-                        label);
+    return CopyWithKind(dst.ptr, dst.size, src.ptr, copy_size, CopyKind(dst, src), label);
 }
 
-bool VerifyPattern(const std::vector<uint8_t>& data, uint32_t seed,
-                   const std::string& label)
+bool VerifyPattern(const std::vector<uint8_t>& data, uint32_t seed, const std::string& label)
 {
     for (size_t i = 0; i < data.size(); ++i) {
-        const uint8_t expected =
-            static_cast<uint8_t>((seed + (i * 131U) + (i >> 3U)) & 0xffU);
+        const uint8_t expected = static_cast<uint8_t>((seed + (i * 131U) + (i >> 3U)) & 0xffU);
         if (data[i] != expected) {
             std::cerr << "  " << label << " mismatch at offset=" << i
                       << ", expected=" << static_cast<int>(expected)

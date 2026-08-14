@@ -1,11 +1,10 @@
 #pragma once
 
-#include "physical_memory_utils.h"
-
 #include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
+#include "physical_memory_utils.h"
 
 namespace acltest::internal {
 
@@ -42,7 +41,6 @@ aclrtMemcpyKind CopyKind(const Endpoint& dst, const Endpoint& src);
 
 bool CopyEndpoint(const Endpoint& dst, const Endpoint& src, size_t copy_size,
                   const std::string& label);
-bool VerifyPattern(const std::vector<uint8_t>& data, uint32_t seed,
-                   const std::string& label);
+bool VerifyPattern(const std::vector<uint8_t>& data, uint32_t seed, const std::string& label);
 
 }  // namespace acltest::internal

@@ -1,16 +1,13 @@
-#include "physical_memory_ipc_internal.h"
-
-#include <unistd.h>
-
 #include <cerrno>
 #include <cstdio>
 #include <iostream>
+#include <unistd.h>
+#include "physical_memory_ipc_internal.h"
 
 namespace acltest::internal {
 namespace {
 
-void FillResult(ChildResult* result, bool ok, aclError ret,
-                const std::string& message)
+void FillResult(ChildResult* result, bool ok, aclError ret, const std::string& message)
 {
     result->magic = kResultMagic;
     result->ok = ok ? 1 : 0;
@@ -26,9 +23,7 @@ bool WriteFull(int fd, const void* data, size_t size)
     while (size != 0U) {
         const ssize_t written = write(fd, ptr, size);
         if (written < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
+            if (errno == EINTR) { continue; }
             return false;
         }
         ptr += written;
@@ -43,14 +38,10 @@ bool ReadFull(int fd, void* data, size_t size)
     while (size != 0U) {
         const ssize_t got = read(fd, ptr, size);
         if (got < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
+            if (errno == EINTR) { continue; }
             return false;
         }
-        if (got == 0) {
-            return false;
-        }
+        if (got == 0) { return false; }
         ptr += got;
         size -= static_cast<size_t>(got);
     }
@@ -65,8 +56,7 @@ void CloseFd(int* fd)
     }
 }
 
-void SendChildResult(int write_fd, bool ok, aclError ret,
-                     const std::string& message)
+void SendChildResult(int write_fd, bool ok, aclError ret, const std::string& message)
 {
     ChildResult result;
     FillResult(&result, ok, ret, message);
@@ -77,9 +67,7 @@ void SendStopMessage(int fd)
 {
     ShareMsg msg;
     msg.magic = kStopMagic;
-    if (!WriteFull(fd, &msg, sizeof(msg))) {
-        std::cerr << "  parent failed to send stop msg\n";
-    }
+    if (!WriteFull(fd, &msg, sizeof(msg))) { std::cerr << "  parent failed to send stop msg\n"; }
 }
 
 }  // namespace acltest::internal

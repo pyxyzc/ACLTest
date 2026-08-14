@@ -1,10 +1,8 @@
-#include "physical_memory_ipc_endpoint.h"
-
-#include "console_utils.h"
-
 #include <array>
 #include <iostream>
 #include <vector>
+#include "console_utils.h"
+#include "physical_memory_ipc_endpoint.h"
 
 namespace acltest::internal {
 
@@ -31,8 +29,7 @@ int RunIpcCopyDirectionChild(int write_fd, const ShareMsg& share_msg)
     for (uint32_t i = 0; i < share_msg.handle_count && ok; ++i) {
         const auto memory_kind = MemoryKindFromWire(share_msg.handle_memory_kinds[i]);
         const auto config = MakeConfigForKind(share_msg, memory_kind);
-        ok = ImportAndMapSharedHandle(share_msg, i, config, &mappings[i],
-                                      &failure_ret);
+        ok = ImportAndMapSharedHandle(share_msg, i, config, &mappings[i], &failure_ret);
     }
 
     DeviceBuffer device_buffer;
@@ -44,8 +41,7 @@ int RunIpcCopyDirectionChild(int write_fd, const ShareMsg& share_msg)
     std::vector<uint8_t> expected = MakePattern(test_size, share_msg.parent_seed);
     std::vector<uint8_t> actual(test_size, 0);
 
-    const uint32_t source_handle_index =
-        HandleIndexForEndpoint(share_msg, source_kind, true);
+    const uint32_t source_handle_index = HandleIndexForEndpoint(share_msg, source_kind, true);
     const uint32_t destination_handle_index =
         HandleIndexForEndpoint(share_msg, destination_kind, false);
     if (ok && IsImportedEndpoint(source_kind) &&
@@ -64,10 +60,10 @@ int RunIpcCopyDirectionChild(int write_fd, const ShareMsg& share_msg)
     Endpoint source;
     Endpoint destination;
     if (ok) {
-        source = ResolveChildEndpoint(source_kind, source_handle_index, &mappings,
-                                      &device_buffer, &expected);
-        destination = ResolveChildEndpoint(destination_kind, destination_handle_index,
-                                            &mappings, &device_buffer, &actual);
+        source = ResolveChildEndpoint(source_kind, source_handle_index, &mappings, &device_buffer,
+                                      &expected);
+        destination = ResolveChildEndpoint(destination_kind, destination_handle_index, &mappings,
+                                           &device_buffer, &actual);
     }
 
     if (ok && source_kind == IpcEndpointKind::DeviceBuffer) {
@@ -75,32 +71,22 @@ int RunIpcCopyDirectionChild(int write_fd, const ShareMsg& share_msg)
                                     MemorySide::Host};
         ok = CopyIpcEndpoint(source, setup_source, expected.size(), "child setup");
     }
-    if (ok) {
-        ok = CopyIpcEndpoint(destination, source, expected.size(), "child copy");
-    }
+    if (ok) { ok = CopyIpcEndpoint(destination, source, expected.size(), "child copy"); }
     if (ok && destination_kind == IpcEndpointKind::DeviceBuffer) {
         const Endpoint readback_destination{"host buffer", actual.data(), actual.size(),
                                             MemorySide::Host};
-        ok = CopyIpcEndpoint(readback_destination, destination, actual.size(),
-                             "child readback");
+        ok = CopyIpcEndpoint(readback_destination, destination, actual.size(), "child readback");
     }
 
     const bool verify_in_child = ok && !IsImportedEndpoint(destination_kind);
-    if (verify_in_child) {
-        ok = VerifyPattern(actual, share_msg.parent_seed, direction);
-    }
-    if (!ok && !verify_in_child) {
-        PrintRed("  " + direction + " ×");
-    }
+    if (verify_in_child) { ok = VerifyPattern(actual, share_msg.parent_seed, direction); }
+    if (!ok && !verify_in_child) { PrintRed("  " + direction + " ×"); }
 
     device_buffer.Cleanup();
-    for (uint32_t i = 0; i < share_msg.handle_count; ++i) {
-        mappings[i].Cleanup();
-    }
+    for (uint32_t i = 0; i < share_msg.handle_count; ++i) { mappings[i].Cleanup(); }
 
     const aclError result_ret =
-        ok ? ACL_SUCCESS
-           : (failure_ret == ACL_SUCCESS ? ACL_ERROR_RT_PARAM_INVALID : failure_ret);
+        ok ? ACL_SUCCESS : (failure_ret == ACL_SUCCESS ? ACL_ERROR_RT_PARAM_INVALID : failure_ret);
     SendChildResult(write_fd, ok, result_ret,
                     ok ? "child copied direction" : "child copy direction failed");
     return ok ? 0 : 1;

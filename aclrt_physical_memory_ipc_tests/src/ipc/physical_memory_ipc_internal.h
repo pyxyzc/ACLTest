@@ -1,11 +1,10 @@
 #pragma once
 
-#include "physical_memory_common.h"
-#include "physical_memory_copy.h"
-
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include "physical_memory_common.h"
+#include "physical_memory_copy.h"
 
 namespace acltest::internal {
 
@@ -82,15 +81,14 @@ bool WriteFull(int fd, const void* data, size_t size);
 bool ReadFull(int fd, void* data, size_t size);
 void CloseFd(int* fd);
 
-void SendChildResult(int write_fd, bool ok, aclError ret,
-                     const std::string& message);
+void SendChildResult(int write_fd, bool ok, aclError ret, const std::string& message);
 void SendStopMessage(int fd);
 
 bool ExportShareableHandle(const Options& options, aclrtDrvMemHandle handle,
                            int32_t child_bare_tgid, SharedHandleBlob* blob);
 bool ImportAndMapSharedHandle(const ShareMsg& share_msg, size_t index,
-                              const PhysicalMemoryConfig& config,
-                              PhysicalMapping* mapping, aclError* failure_ret);
+                              const PhysicalMemoryConfig& config, PhysicalMapping* mapping,
+                              aclError* failure_ret);
 
 int RunIpcChild(int read_fd, int write_fd);
 int RunIpcCopyDirectionChild(int write_fd, const ShareMsg& share_msg);

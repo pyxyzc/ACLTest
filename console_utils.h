@@ -18,24 +18,12 @@ inline void PrintColor(const std::string& message, const char* color)
     std::cout << color << message << style::RESET << "\n";
 }
 
-inline void PrintRed(const std::string& message)
-{
-    PrintColor(message, style::RED);
-}
+inline void PrintRed(const std::string& message) { PrintColor(message, style::RED); }
 
-inline void PrintGreen(const std::string& message)
-{
-    PrintColor(message, style::GREEN);
-}
+inline void PrintGreen(const std::string& message) { PrintColor(message, style::GREEN); }
 
-inline void PrintBlue(const std::string& message)
-{
-    PrintColor(message, style::BLUE);
-}
+inline void PrintBlue(const std::string& message) { PrintColor(message, style::BLUE); }
 
-inline void PrintYellow(const std::string& message)
-{
-    PrintColor(message, style::YELLOW);
-}
+inline void PrintYellow(const std::string& message) { PrintColor(message, style::YELLOW); }
 
 }  // namespace acltest::internal

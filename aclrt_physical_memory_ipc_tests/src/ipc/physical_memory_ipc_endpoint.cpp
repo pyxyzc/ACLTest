@@ -8,8 +8,7 @@ IpcEndpointKind EndpointKindFromWire(uint32_t value)
         case IpcEndpointKind::ImportedDeviceVa:
         case IpcEndpointKind::ImportedHostVa:
         case IpcEndpointKind::DeviceBuffer:
-        case IpcEndpointKind::HostBuffer:
-            return static_cast<IpcEndpointKind>(value);
+        case IpcEndpointKind::HostBuffer: return static_cast<IpcEndpointKind>(value);
     }
     return IpcEndpointKind::HostBuffer;
 }
@@ -18,8 +17,7 @@ IpcMemoryKind MemoryKindFromWire(uint32_t value)
 {
     switch (static_cast<IpcMemoryKind>(value)) {
         case IpcMemoryKind::DevicePhysical:
-        case IpcMemoryKind::HostPhysical:
-            return static_cast<IpcMemoryKind>(value);
+        case IpcMemoryKind::HostPhysical: return static_cast<IpcMemoryKind>(value);
     }
     return IpcMemoryKind::DevicePhysical;
 }
@@ -27,14 +25,10 @@ IpcMemoryKind MemoryKindFromWire(uint32_t value)
 const char* EndpointName(IpcEndpointKind endpoint)
 {
     switch (endpoint) {
-        case IpcEndpointKind::ImportedDeviceVa:
-            return "imported device VA";
-        case IpcEndpointKind::ImportedHostVa:
-            return "imported host VA";
-        case IpcEndpointKind::DeviceBuffer:
-            return "device buffer";
-        case IpcEndpointKind::HostBuffer:
-            return "host buffer";
+        case IpcEndpointKind::ImportedDeviceVa: return "imported device VA";
+        case IpcEndpointKind::ImportedHostVa: return "imported host VA";
+        case IpcEndpointKind::DeviceBuffer: return "device buffer";
+        case IpcEndpointKind::HostBuffer: return "host buffer";
     }
     return "unknown";
 }
@@ -47,9 +41,8 @@ bool IsImportedEndpoint(IpcEndpointKind endpoint)
 
 IpcMemoryKind ImportedMemoryKind(IpcEndpointKind endpoint)
 {
-    return endpoint == IpcEndpointKind::ImportedHostVa
-               ? IpcMemoryKind::HostPhysical
-               : IpcMemoryKind::DevicePhysical;
+    return endpoint == IpcEndpointKind::ImportedHostVa ? IpcMemoryKind::HostPhysical
+                                                       : IpcMemoryKind::DevicePhysical;
 }
 
 MemorySide EndpointSide(IpcEndpointKind endpoint)
@@ -60,16 +53,13 @@ MemorySide EndpointSide(IpcEndpointKind endpoint)
                : MemorySide::Host;
 }
 
-PhysicalMemoryConfig MakeConfigForKind(const Options& options,
-                                       IpcMemoryKind memory_kind)
+PhysicalMemoryConfig MakeConfigForKind(const Options& options, IpcMemoryKind memory_kind)
 {
-    return memory_kind == IpcMemoryKind::HostPhysical
-               ? MakeHostConfig(options)
-               : MakeDeviceConfig(options);
+    return memory_kind == IpcMemoryKind::HostPhysical ? MakeHostConfig(options)
+                                                      : MakeDeviceConfig(options);
 }
 
-PhysicalMemoryConfig MakeConfigForKind(const ShareMsg& share_msg,
-                                       IpcMemoryKind memory_kind)
+PhysicalMemoryConfig MakeConfigForKind(const ShareMsg& share_msg, IpcMemoryKind memory_kind)
 {
     Options options;
     options.device = share_msg.device;
@@ -86,15 +76,14 @@ std::string DirectionName(IpcEndpointKind source, IpcEndpointKind destination)
 bool CopyIpcEndpoint(const Endpoint& dst, const Endpoint& src, size_t copy_size,
                      const std::string& label_prefix)
 {
-    const std::string label = label_prefix + " aclrtMemcpy(" +
-                              std::string(src.name) + " -> " + dst.name + ")";
+    const std::string label =
+        label_prefix + " aclrtMemcpy(" + std::string(src.name) + " -> " + dst.name + ")";
     return CopyEndpoint(dst, src, copy_size, label);
 }
 
 bool EndpointUsesDeviceBuffer(IpcEndpointKind source, IpcEndpointKind destination)
 {
-    return source == IpcEndpointKind::DeviceBuffer ||
-           destination == IpcEndpointKind::DeviceBuffer;
+    return source == IpcEndpointKind::DeviceBuffer || destination == IpcEndpointKind::DeviceBuffer;
 }
 
 bool ValidImportedIndex(uint32_t index, const ShareMsg& share_msg)
@@ -102,19 +91,15 @@ bool ValidImportedIndex(uint32_t index, const ShareMsg& share_msg)
     return index < share_msg.handle_count && index < kMaxSharedHandleCount;
 }
 
-uint32_t HandleIndexForEndpoint(const ShareMsg& share_msg,
-                                IpcEndpointKind endpoint, bool is_source)
+uint32_t HandleIndexForEndpoint(const ShareMsg& share_msg, IpcEndpointKind endpoint, bool is_source)
 {
-    if (!IsImportedEndpoint(endpoint)) {
-        return kInvalidHandleIndex;
-    }
+    if (!IsImportedEndpoint(endpoint)) { return kInvalidHandleIndex; }
     return is_source ? share_msg.src_handle_index : share_msg.dst_handle_index;
 }
 
-Endpoint ResolveChildEndpoint(
-    IpcEndpointKind endpoint, uint32_t handle_index,
-    std::array<PhysicalMapping, kMaxSharedHandleCount>* mappings,
-    DeviceBuffer* device_buffer, std::vector<uint8_t>* host_buffer)
+Endpoint ResolveChildEndpoint(IpcEndpointKind endpoint, uint32_t handle_index,
+                              std::array<PhysicalMapping, kMaxSharedHandleCount>* mappings,
+                              DeviceBuffer* device_buffer, std::vector<uint8_t>* host_buffer)
 {
     Endpoint resolved;
     resolved.name = EndpointName(endpoint);

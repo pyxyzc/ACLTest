@@ -1,5 +1,4 @@
 #include "physical_memory_utils.h"
-
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -8,26 +7,18 @@ namespace acltest::internal {
 namespace {
 
 constexpr size_t kHostPhysicalFixedGranularity = 2UL * 1024UL * 1024UL;
-constexpr aclrtMemAccessFlags kAclMemAccessReadWrite =
-    static_cast<aclrtMemAccessFlags>(0x3UL);
+constexpr aclrtMemAccessFlags kAclMemAccessReadWrite = static_cast<aclrtMemAccessFlags>(0x3UL);
 
 std::string AclErrorHint(aclError ret)
 {
     switch (ret) {
-        case ACL_SUCCESS:
-            return "ACL_SUCCESS";
-        case ACL_ERROR_REPEAT_INITIALIZE:
-            return "ACL_ERROR_REPEAT_INITIALIZE";
-        case ACL_ERROR_INVALID_PARAM:
-            return "ACL_ERROR_INVALID_PARAM";
-        case ACL_ERROR_RT_PARAM_INVALID:
-            return "ACL_ERROR_RT_PARAM_INVALID";
-        case ACL_ERROR_RT_FEATURE_NOT_SUPPORT:
-            return "ACL_ERROR_RT_FEATURE_NOT_SUPPORT";
-        case ACL_ERROR_RT_NO_DEVICE:
-            return "ACL_ERROR_RT_NO_DEVICE";
-        default:
-            return "unknown";
+        case ACL_SUCCESS: return "ACL_SUCCESS";
+        case ACL_ERROR_REPEAT_INITIALIZE: return "ACL_ERROR_REPEAT_INITIALIZE";
+        case ACL_ERROR_INVALID_PARAM: return "ACL_ERROR_INVALID_PARAM";
+        case ACL_ERROR_RT_PARAM_INVALID: return "ACL_ERROR_RT_PARAM_INVALID";
+        case ACL_ERROR_RT_FEATURE_NOT_SUPPORT: return "ACL_ERROR_RT_FEATURE_NOT_SUPPORT";
+        case ACL_ERROR_RT_NO_DEVICE: return "ACL_ERROR_RT_NO_DEVICE";
+        default: return "unknown";
     }
 }
 
@@ -46,20 +37,17 @@ std::string FormatAclRet(aclError ret)
 
 bool LogAcl(const std::string& label, aclError ret)
 {
-    std::cout << "  " << std::left << std::setw(42) << label
-              << " ret=" << FormatAclRet(ret) << "\n";
+    std::cout << "  " << std::left << std::setw(42) << label << " ret=" << FormatAclRet(ret)
+              << "\n";
     return ret == ACL_SUCCESS;
 }
-
 
 bool AclRuntime::Init()
 {
     const aclError init_ret = aclInit(nullptr);
     std::cout << "  " << std::left << std::setw(42) << "aclInit"
               << " ret=" << FormatAclRet(init_ret) << "\n";
-    if (init_ret != ACL_SUCCESS && init_ret != ACL_ERROR_REPEAT_INITIALIZE) {
-        return false;
-    }
+    if (init_ret != ACL_SUCCESS && init_ret != ACL_ERROR_REPEAT_INITIALIZE) { return false; }
     initialized_here_ = (init_ret == ACL_SUCCESS);
     return true;
 }
@@ -67,9 +55,7 @@ bool AclRuntime::Init()
 bool AclRuntime::SetDevice(int device)
 {
     const aclError ret = aclrtSetDevice(device);
-    if (!LogAcl("aclrtSetDevice(" + std::to_string(device) + ")", ret)) {
-        return false;
-    }
+    if (!LogAcl("aclrtSetDevice(" + std::to_string(device) + ")", ret)) { return false; }
     if (ret == ACL_SUCCESS && !device_set_) {
         device_ = device;
         device_set_ = true;
@@ -79,12 +65,8 @@ bool AclRuntime::SetDevice(int device)
 
 AclRuntime::~AclRuntime()
 {
-    if (device_set_) {
-        (void)aclrtResetDevice(device_);
-    }
-    if (initialized_here_) {
-        (void)aclFinalize();
-    }
+    if (device_set_) { (void)aclrtResetDevice(device_); }
+    if (initialized_here_) { (void)aclFinalize(); }
 }
 
 aclrtPhysicalMemProp MakeDevicePhysicalMemProp(int device)
@@ -146,9 +128,7 @@ PhysicalMemoryConfig MakeHostConfig(const Options& options)
 
 size_t AlignUp(size_t value, size_t alignment)
 {
-    if (alignment == 0U) {
-        return value;
-    }
+    if (alignment == 0U) { return value; }
     return ((value + alignment - 1U) / alignment) * alignment;
 }
 
@@ -156,27 +136,21 @@ bool QueryAlignedSize(const PhysicalMemoryConfig& config, size_t requested, size
 {
     if (config.fixed_allocation_granularity != 0U) {
         *aligned = AlignUp(requested, config.fixed_allocation_granularity);
-        std::cout << "  skip aclrtMemGetAllocationGranularity for "
-                  << config.name << "\n";
+        std::cout << "  skip aclrtMemGetAllocationGranularity for " << config.name << "\n";
         std::cout << "  requested_size=" << requested
-                  << ", fixed_granularity="
-                  << config.fixed_allocation_granularity
+                  << ", fixed_granularity=" << config.fixed_allocation_granularity
                   << ", aligned_size=" << *aligned << "\n";
         return true;
     }
 
     size_t minimum = 0;
-    auto ret = aclrtMemGetAllocationGranularity(
-        const_cast<aclrtPhysicalMemProp*>(&config.prop),
-        ACL_RT_MEM_ALLOC_GRANULARITY_MINIMUM, &minimum);
-    if (!LogAcl("aclrtMemGetAllocationGranularity(MIN)", ret)) {
-        return false;
-    }
+    auto ret = aclrtMemGetAllocationGranularity(const_cast<aclrtPhysicalMemProp*>(&config.prop),
+                                                ACL_RT_MEM_ALLOC_GRANULARITY_MINIMUM, &minimum);
+    if (!LogAcl("aclrtMemGetAllocationGranularity(MIN)", ret)) { return false; }
 
     size_t recommended = 0;
-    ret = aclrtMemGetAllocationGranularity(
-        const_cast<aclrtPhysicalMemProp*>(&config.prop),
-        ACL_RT_MEM_ALLOC_GRANULARITY_RECOMMENDED, &recommended);
+    ret = aclrtMemGetAllocationGranularity(const_cast<aclrtPhysicalMemProp*>(&config.prop),
+                                           ACL_RT_MEM_ALLOC_GRANULARITY_RECOMMENDED, &recommended);
     (void)LogAcl("aclrtMemGetAllocationGranularity(REC)", ret);
 
     if (minimum == 0U) {
@@ -186,10 +160,9 @@ bool QueryAlignedSize(const PhysicalMemoryConfig& config, size_t requested, size
 
     std::cout << "  minimum_granularity=" << minimum << "\n";
     *aligned = AlignUp(requested, minimum);
-    std::cout << "  requested_size=" << requested
-              << ", minimum_granularity=" << minimum
-              << ", recommended_granularity=" << recommended
-              << ", aligned_size=" << *aligned << "\n";
+    std::cout << "  requested_size=" << requested << ", minimum_granularity=" << minimum
+              << ", recommended_granularity=" << recommended << ", aligned_size=" << *aligned
+              << "\n";
     return true;
 }
 
@@ -202,33 +175,26 @@ std::vector<uint8_t> MakePattern(size_t size, uint32_t seed)
     return data;
 }
 
-bool PhysicalMapping::ReserveMapAndSetAccess(aclrtDrvMemHandle input_handle,
-                                             size_t map_size,
+bool PhysicalMapping::ReserveMapAndSetAccess(aclrtDrvMemHandle input_handle, size_t map_size,
                                              const aclrtMemLocation& access_location)
 {
     handle = input_handle;
     size = map_size;
 
     aclError ret = aclrtReserveMemAddress(&virt, size, 0, nullptr, 0);
-    if (!LogAcl("aclrtReserveMemAddress", ret)) {
-        return false;
-    }
+    if (!LogAcl("aclrtReserveMemAddress", ret)) { return false; }
     reserved = true;
     std::cout << "  reserved virt=" << virt << "\n";
 
     ret = aclrtMapMem(virt, size, 0, handle, 0);
-    if (!LogAcl("aclrtMapMem", ret)) {
-        return false;
-    }
+    if (!LogAcl("aclrtMapMem", ret)) { return false; }
     mapped = true;
 
     aclrtMemAccessDesc access = {};
     access.location = access_location;
     access.flags = kAclMemAccessReadWrite;
     ret = aclrtMemSetAccess(virt, size, &access, 1);
-    if (!LogAcl("aclrtMemSetAccess(READWRITE)", ret)) {
-        return false;
-    }
+    if (!LogAcl("aclrtMemSetAccess(READWRITE)", ret)) { return false; }
     return true;
 }
 
@@ -249,19 +215,14 @@ void PhysicalMapping::Cleanup()
     }
 }
 
-PhysicalMapping::~PhysicalMapping()
-{
-    Cleanup();
-}
+PhysicalMapping::~PhysicalMapping() { Cleanup(); }
 
 bool AllocateAndMapPhysical(const PhysicalMemoryConfig& config, size_t aligned_size,
                             PhysicalMapping* mapping)
 {
     aclrtDrvMemHandle handle = nullptr;
     aclError ret = aclrtMallocPhysical(&handle, aligned_size, &config.prop, 0);
-    if (!LogAcl("aclrtMallocPhysical", ret)) {
-        return false;
-    }
+    if (!LogAcl("aclrtMallocPhysical", ret)) { return false; }
     mapping->owns_handle = true;
     return mapping->ReserveMapAndSetAccess(handle, aligned_size, config.access_location);
 }
@@ -269,24 +230,23 @@ bool AllocateAndMapPhysical(const PhysicalMemoryConfig& config, size_t aligned_s
 bool CopyHostToMapping(void* dst, size_t dst_max, const std::vector<uint8_t>& src,
                        const PhysicalMemoryConfig& config, const std::string& label)
 {
-    const aclError ret = aclrtMemcpy(dst, dst_max, src.data(), src.size(),
-                                     config.host_to_mapping_kind);
+    const aclError ret =
+        aclrtMemcpy(dst, dst_max, src.data(), src.size(), config.host_to_mapping_kind);
     return LogAcl(label, ret);
 }
 
 bool CopyMappingToHost(std::vector<uint8_t>* dst, const void* src, size_t src_size,
                        const PhysicalMemoryConfig& config, const std::string& label)
 {
-    const aclError ret = aclrtMemcpy(dst->data(), dst->size(), src, src_size,
-                                     config.mapping_to_host_kind);
+    const aclError ret =
+        aclrtMemcpy(dst->data(), dst->size(), src, src_size, config.mapping_to_host_kind);
     return LogAcl(label, ret);
 }
 
 bool CopyMappingToMapping(void* dst, size_t dst_max, const void* src, size_t copy_size,
                           const PhysicalMemoryConfig& config, const std::string& label)
 {
-    const aclError ret = aclrtMemcpy(dst, dst_max, src, copy_size,
-                                     config.mapping_to_mapping_kind);
+    const aclError ret = aclrtMemcpy(dst, dst_max, src, copy_size, config.mapping_to_mapping_kind);
     return LogAcl(label, ret);
 }
 
