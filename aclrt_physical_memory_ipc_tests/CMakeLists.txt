@@ -107,17 +107,25 @@ int main()
 unset(CMAKE_REQUIRED_INCLUDES)
 
 add_library(physical_memory_probe_common STATIC
-    src/physical_memory_common.cpp
-    src/physical_memory_utils.cpp
-    src/physical_memory_single_process.cpp
-    src/physical_memory_ipc.cpp
-    src/physical_memory_ipc_common.cpp
-    src/physical_memory_ipc_single_mapping.cpp
-    src/physical_memory_ipc_va_to_va.cpp
+    src/app/physical_memory_common.cpp
+    src/runtime/physical_memory_utils.cpp
+    src/runtime/physical_memory_copy.cpp
+    src/app/physical_memory_single_process.cpp
+    src/ipc/physical_memory_ipc.cpp
+    src/ipc/physical_memory_ipc_transport.cpp
+    src/ipc/physical_memory_ipc_process.cpp
+    src/ipc/physical_memory_ipc_share.cpp
+    src/ipc/physical_memory_ipc_endpoint.cpp
+    src/ipc/physical_memory_ipc_parent.cpp
+    src/ipc/physical_memory_ipc_child.cpp
+    src/ipc/physical_memory_ipc_cases.cpp
 )
 
 target_include_directories(physical_memory_probe_common PUBLIC
-    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/app"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/runtime"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ipc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
     "${ACL_INCLUDE_DIR}"
 )
 
@@ -157,13 +165,13 @@ function(add_physical_memory_probe target source)
 endfunction()
 
 add_physical_memory_probe(single_process_vmm_probe
-    src/single_process_vmm_probe.cpp)
+    src/app/single_process_vmm_probe.cpp)
 add_physical_memory_probe(device_physical_ipc_probe
-    src/device_physical_ipc_probe.cpp)
+    src/app/device_physical_ipc_probe.cpp)
 add_physical_memory_probe(host_physical_ipc_probe
-    src/host_physical_ipc_probe.cpp)
+    src/app/host_physical_ipc_probe.cpp)
 add_physical_memory_probe(physical_memory_ipc_probe
-    src/physical_memory_ipc_probe.cpp)
+    src/app/physical_memory_ipc_probe.cpp)
 
 message(STATUS "ACL include dir: ${ACL_INCLUDE_DIR}")
 message(STATUS "AscendCL library: ${ASCENDCL_LIBRARY}")

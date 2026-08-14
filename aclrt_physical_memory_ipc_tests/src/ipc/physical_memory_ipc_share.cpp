@@ -1,12 +1,7 @@
 #include "physical_memory_ipc_internal.h"
 
-#include <unistd.h>
-
-#include <cerrno>
-#include <cstdio>
 #include <cstring>
 #include <iostream>
-#include <string>
 
 #ifndef ACL_RT_VMM_EXPORT_FLAG_DEFAULT
 #define ACL_RT_VMM_EXPORT_FLAG_DEFAULT 0x0UL
@@ -164,83 +159,7 @@ bool ImportShareableHandle(const SharedHandleBlob& blob, int device,
     return LogAcl("aclrtMemImportFromShareableHandle(V1)", ret);
 }
 
-void FillResult(ChildResult* result, bool ok, aclError ret,
-                const std::string& message)
-{
-    result->magic = kResultMagic;
-    result->ok = ok ? 1 : 0;
-    result->ret = static_cast<int32_t>(ret);
-    std::snprintf(result->message, sizeof(result->message), "%s", message.c_str());
-}
-
 }  // namespace
-
-bool WriteFull(int fd, const void* data, size_t size)
-{
-    const auto* ptr = static_cast<const uint8_t*>(data);
-    while (size != 0U) {
-        const ssize_t written = write(fd, ptr, size);
-        if (written < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
-            return false;
-        }
-        ptr += written;
-        size -= static_cast<size_t>(written);
-    }
-    return true;
-}
-
-bool ReadFull(int fd, void* data, size_t size)
-{
-    auto* ptr = static_cast<uint8_t*>(data);
-    while (size != 0U) {
-        const ssize_t got = read(fd, ptr, size);
-        if (got < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
-            return false;
-        }
-        if (got == 0) {
-            return false;
-        }
-        ptr += got;
-        size -= static_cast<size_t>(got);
-    }
-    return true;
-}
-
-void CloseFd(int* fd)
-{
-    if (*fd >= 0) {
-        (void)close(*fd);
-        *fd = -1;
-    }
-}
-
-void SendChildResult(int write_fd, bool ok, aclError ret,
-                     const std::string& message)
-{
-    ChildResult result;
-    FillResult(&result, ok, ret, message);
-    (void)WriteFull(write_fd, &result, sizeof(result));
-}
-
-void SendStopMessage(int fd)
-{
-    ShareMsg msg;
-    msg.magic = kStopMagic;
-    if (!WriteFull(fd, &msg, sizeof(msg))) {
-        std::cerr << "  parent failed to send stop msg\n";
-    }
-}
-
-bool IsHostPhysicalConfig(const PhysicalMemoryConfig& config)
-{
-    return config.access_location.type == ACL_MEM_LOCATION_TYPE_HOST;
-}
 
 bool ExportShareableHandle(const Options& options, aclrtDrvMemHandle handle,
                            int32_t child_bare_tgid, SharedHandleBlob* blob)
@@ -348,12 +267,12 @@ bool ImportAndMapSharedHandle(const ShareMsg& share_msg, size_t index,
     const uint64_t map_size = share_msg.handle_aligned_sizes[index] != 0U
                                   ? share_msg.handle_aligned_sizes[index]
                                   : share_msg.aligned_size;
-
     std::cout << "  import handle[" << index << "] for " << config.name
               << ", share_msg_device=" << share_msg.device
               << ", aligned_size=" << map_size
               << ", test_size=" << share_msg.test_size << "\n";
     PrintSharedHandleBlob("received share blob", share_msg.handles[index]);
+
     aclrtDrvMemHandle imported = nullptr;
     if (!ImportShareableHandle(share_msg.handles[index], share_msg.device, &imported,
                                failure_ret)) {
@@ -370,62 +289,6 @@ bool ImportAndMapSharedHandle(const ShareMsg& share_msg, size_t index,
         return false;
     }
     return true;
-}
-
-int RunIpcChild(int read_fd, int write_fd)
-{
-    std::cout << "\n[child] started, os_pid=" << getpid() << "\n";
-
-    AclRuntime runtime;
-    if (!runtime.Init()) {
-        SendChildResult(write_fd, false, ACL_ERROR_RT_PARAM_INVALID, "child aclInit failed");
-        return 1;
-    }
-
-    int32_t bare_tgid = -1;
-    aclError ret = aclrtDeviceGetBareTgid(&bare_tgid);
-    if (!LogAcl("aclrtDeviceGetBareTgid(child)", ret)) {
-        SendChildResult(write_fd, false, ret, "child aclrtDeviceGetBareTgid failed");
-        return 1;
-    }
-
-    ChildPidMsg pid_msg;
-    pid_msg.bare_tgid = bare_tgid;
-    pid_msg.os_pid = static_cast<int32_t>(getpid());
-    if (!WriteFull(write_fd, &pid_msg, sizeof(pid_msg))) {
-        std::cerr << "[child] failed to send bare tgid\n";
-        return 1;
-    }
-
-    ShareMsg share_msg;
-    if (!ReadFull(read_fd, &share_msg, sizeof(share_msg))) {
-        SendChildResult(write_fd, false, ACL_ERROR_RT_PARAM_INVALID,
-                        "child failed to read share msg");
-        return 1;
-    }
-    if (share_msg.magic == kStopMagic) {
-        SendChildResult(write_fd, false, ACL_ERROR_RT_PARAM_INVALID,
-                        "parent setup failed before sharing handle");
-        return 1;
-    }
-    if (share_msg.magic != kShareMagic) {
-        SendChildResult(write_fd, false, ACL_ERROR_RT_PARAM_INVALID,
-                        "child received invalid share msg");
-        return 1;
-    }
-
-    if (!runtime.SetDevice(share_msg.device)) {
-        SendChildResult(write_fd, false, ACL_ERROR_RT_PARAM_INVALID, "child set device failed");
-        return 1;
-    }
-
-    if (share_msg.test_kind == static_cast<uint32_t>(IpcTestKind::CopyDirection)) {
-        return RunIpcCopyDirectionChild(write_fd, share_msg);
-    }
-
-    SendChildResult(write_fd, false, ACL_ERROR_RT_PARAM_INVALID,
-                    "child received unsupported IPC test kind");
-    return 1;
 }
 
 }  // namespace acltest::internal

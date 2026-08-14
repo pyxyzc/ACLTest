@@ -202,24 +202,6 @@ std::vector<uint8_t> MakePattern(size_t size, uint32_t seed)
     return data;
 }
 
-bool VerifyPattern(const std::vector<uint8_t>& data, uint32_t seed,
-                   const std::string& label)
-{
-    for (size_t i = 0; i < data.size(); ++i) {
-        const uint8_t expected =
-            static_cast<uint8_t>((seed + (i * 131U) + (i >> 3U)) & 0xffU);
-        if (data[i] != expected) {
-            std::cerr << "  " << label << " mismatch at offset=" << i
-                      << ", expected=" << static_cast<int>(expected)
-                      << ", actual=" << static_cast<int>(data[i]) << "\n";
-            return false;
-        }
-    }
-    std::cout << "  " << label << " verified " << data.size() << " bytes\n";
-    return true;
-}
-
-
 bool PhysicalMapping::ReserveMapAndSetAccess(aclrtDrvMemHandle input_handle,
                                              size_t map_size,
                                              const aclrtMemLocation& access_location)
@@ -265,6 +247,11 @@ void PhysicalMapping::Cleanup()
         handle = nullptr;
         owns_handle = false;
     }
+}
+
+PhysicalMapping::~PhysicalMapping()
+{
+    Cleanup();
 }
 
 bool AllocateAndMapPhysical(const PhysicalMemoryConfig& config, size_t aligned_size,

@@ -4,6 +4,9 @@
 
 接口用法总结见 [docs/interface_usage.md](docs/interface_usage.md)。
 
+源码按职责分为三层：`src/app` 放 probe 入口和测试 runner，`src/runtime` 放 ACL
+Runtime、物理内存、映射和拷贝基础能力，`src/ipc` 放 IPC 协议、父子进程编排和测试矩阵。
+
 默认优先使用 V2 接口：
 
 - `aclrtMemExportToShareableHandleV2`

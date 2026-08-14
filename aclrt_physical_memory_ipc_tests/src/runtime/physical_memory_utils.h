@@ -49,10 +49,13 @@ bool QueryAlignedSize(const PhysicalMemoryConfig& config, size_t requested,
                       size_t* aligned);
 
 std::vector<uint8_t> MakePattern(size_t size, uint32_t seed);
-bool VerifyPattern(const std::vector<uint8_t>& data, uint32_t seed,
-                   const std::string& label);
 
 struct PhysicalMapping {
+    PhysicalMapping() = default;
+    PhysicalMapping(const PhysicalMapping&) = delete;
+    PhysicalMapping& operator=(const PhysicalMapping&) = delete;
+    ~PhysicalMapping();
+
     aclrtDrvMemHandle handle = nullptr;
     void* virt = nullptr;
     size_t size = 0;

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "physical_memory_common.h"
-#include "physical_memory_utils.h"
+#include "physical_memory_copy.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -86,7 +86,6 @@ void SendChildResult(int write_fd, bool ok, aclError ret,
                      const std::string& message);
 void SendStopMessage(int fd);
 
-bool IsHostPhysicalConfig(const PhysicalMemoryConfig& config);
 bool ExportShareableHandle(const Options& options, aclrtDrvMemHandle handle,
                            int32_t child_bare_tgid, SharedHandleBlob* blob);
 bool ImportAndMapSharedHandle(const ShareMsg& share_msg, size_t index,
