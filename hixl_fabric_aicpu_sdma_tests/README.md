@@ -71,6 +71,13 @@ bash scripts/uninstall_kernel.sh
 
 ## 运行
 
+VMM 物理内存的申请粒度由 `aclrtMemGetAllocationGranularity` 按 Host/Device
+物理属性分别查询。程序会将申请长度向上对齐，并使用同一个对齐后的长度调用
+`aclrtMallocPhysical`、`aclrtMapMem` 和 `aclrtMemSetAccess`；描述符中的 IO size
+仍然是命令行指定的逻辑长度。这样可以避免 `ACL_MEM_P2P_HUGE1G` 等大页属性在
+小 IO benchmark 中出现 `aclrtMapMem(...)=507899`。启动时会打印逻辑长度和两侧
+实际映射长度，便于确认运行时采用的粒度。
+
 默认扫描 D2H 和 H2D，IO size 为 `512B,1K,2K,4K,32K,64K,256K,512K,1M,2M`，固定 IO count 为 128：
 
 ```bash

@@ -41,6 +41,27 @@ size_t RoundUpToBlock(size_t bytes) {
   return ((bytes + kBlockBytes - 1U) / kBlockBytes) * kBlockBytes;
 }
 
+size_t RoundUp(size_t bytes, size_t alignment) {
+  if (alignment == 0U || bytes == 0U) {
+    return bytes;
+  }
+  if (bytes > std::numeric_limits<size_t>::max() - (alignment - 1U)) {
+    throw std::overflow_error("physical memory size cannot be aligned");
+  }
+  return ((bytes + alignment - 1U) / alignment) * alignment;
+}
+
+size_t QueryAlignedSize(const aclrtPhysicalMemProp &property, size_t bytes) {
+  aclrtPhysicalMemProp property_copy = property;
+  size_t granularity = 0U;
+  ACLTEST_CHECK_ACL(aclrtMemGetAllocationGranularity(
+      &property_copy, ACL_RT_MEM_ALLOC_GRANULARITY_MINIMUM, &granularity));
+  if (granularity == 0U) {
+    throw std::runtime_error("aclrtMemGetAllocationGranularity returned zero");
+  }
+  return RoundUp(bytes, granularity);
+}
+
 void LogCleanupError(const char *operation, aclError error) noexcept {
   if (error != ACL_SUCCESS) {
     std::cerr << "warning: " << operation << " failed during cleanup, aclError=" << error << '\n';
@@ -61,17 +82,20 @@ aclrtPhysicalMemProp FabricMemoryPair::DefaultPhysicalProperty() {
   return property;
 }
 
-aclrtDrvMemHandle FabricMemoryPair::AllocateDevicePhysical(size_t bytes, int32_t logic_device_id) {
+FabricMemoryPair::PhysicalAllocation FabricMemoryPair::AllocateDevicePhysical(size_t bytes,
+                                                                                int32_t logic_device_id) {
   aclrtPhysicalMemProp property = DefaultPhysicalProperty();
   property.memAttr = ACL_HBM_MEM_HUGE;
   property.location.type = ACL_MEM_LOCATION_TYPE_DEVICE;
   property.location.id = static_cast<uint32_t>(logic_device_id);
+  const size_t allocation_bytes = QueryAlignedSize(property, bytes);
   aclrtDrvMemHandle handle = nullptr;
-  ACLTEST_CHECK_ACL(aclrtMallocPhysical(&handle, bytes, &property, 0U));
-  return handle;
+  ACLTEST_CHECK_ACL(aclrtMallocPhysical(&handle, allocation_bytes, &property, 0U));
+  return {handle, allocation_bytes};
 }
 
-aclrtDrvMemHandle FabricMemoryPair::AllocateHostPhysical(size_t bytes, int32_t logic_device_id) {
+FabricMemoryPair::PhysicalAllocation FabricMemoryPair::AllocateHostPhysical(size_t bytes,
+                                                                              int32_t logic_device_id) {
   int32_t physical_device_id = -1;
   ACLTEST_CHECK_ACL(aclrtGetPhyDevIdByLogicDevId(logic_device_id, &physical_device_id));
   if (physical_device_id < 0) {
@@ -82,24 +106,31 @@ aclrtDrvMemHandle FabricMemoryPair::AllocateHostPhysical(size_t bytes, int32_t l
   property.memAttr = ACL_MEM_P2P_HUGE1G;
   property.location.type = ACL_MEM_LOCATION_TYPE_HOST_NUMA;
   property.location.id = static_cast<uint32_t>((physical_device_id / kDevicesPerChip) * kNumaNodeStep);
-  aclrtDrvMemHandle handle = nullptr;
-  aclError error = aclrtMallocPhysical(&handle, bytes, &property, 0U);
-  if (error == ACL_SUCCESS) {
-    return handle;
+  aclError last_error = ACL_SUCCESS;
+  for (const bool use_numa : {true, false}) {
+    if (!use_numa) {
+      property.location.type = ACL_MEM_LOCATION_TYPE_HOST;
+      property.location.id = 0U;
+    }
+    const size_t allocation_bytes = QueryAlignedSize(property, bytes);
+    aclrtDrvMemHandle handle = nullptr;
+    const aclError error = aclrtMallocPhysical(&handle, allocation_bytes, &property, 0U);
+    if (error == ACL_SUCCESS) {
+      return {handle, allocation_bytes};
+    }
+    last_error = error;
   }
 
-  handle = nullptr;
-  property.location.type = ACL_MEM_LOCATION_TYPE_HOST;
-  property.location.id = 0U;
-  error = aclrtMallocPhysical(&handle, bytes, &property, 0U);
-  if (error == ACL_SUCCESS) {
-    return handle;
-  }
-
-  handle = nullptr;
   property.memAttr = ACL_MEM_P2P_HUGE;
-  ACLTEST_CHECK_ACL(aclrtMallocPhysical(&handle, bytes, &property, 0U));
-  return handle;
+  const size_t allocation_bytes = QueryAlignedSize(property, bytes);
+  aclrtDrvMemHandle handle = nullptr;
+  const aclError error = aclrtMallocPhysical(&handle, allocation_bytes, &property, 0U);
+  if (error == ACL_SUCCESS) {
+    return {handle, allocation_bytes};
+  }
+  last_error = error;
+  ACLTEST_CHECK_ACL(last_error);
+  return {};
 }
 
 bool FabricMemoryPair::IsA3Soc() {
@@ -144,19 +175,27 @@ void FabricMemoryPair::Initialize(size_t bytes, int32_t logic_device_id) {
   try {
     ReserveArena(bytes);
     bytes_ = bytes;
-    host_handle_ = AllocateHostPhysical(bytes, logic_device_id);
+    const PhysicalAllocation host_allocation = AllocateHostPhysical(bytes, logic_device_id);
+    host_handle_ = host_allocation.handle;
+    host_mapping_bytes_ = host_allocation.mapped_bytes;
     host_va_ = arena_va_;
-    ACLTEST_CHECK_ACL(aclrtMapMem(host_va_, bytes, 0U, host_handle_, 0U));
+    ACLTEST_CHECK_ACL(aclrtMapMem(host_va_, host_mapping_bytes_, 0U, host_handle_, 0U));
+    host_mapped_ = true;
 
     aclrtMemAccessDesc access{};
     access.flags = ACL_RT_MEM_ACCESS_FLAGS_READWRITE;
     access.location.type = ACL_MEM_LOCATION_TYPE_DEVICE;
     access.location.id = static_cast<uint32_t>(logic_device_id);
-    ACLTEST_CHECK_ACL(aclrtMemSetAccess(host_va_, bytes, &access, kOneAccessDescriptor));
+    ACLTEST_CHECK_ACL(aclrtMemSetAccess(host_va_, host_mapping_bytes_, &access, kOneAccessDescriptor));
 
-    device_handle_ = AllocateDevicePhysical(bytes, logic_device_id);
+    const PhysicalAllocation device_allocation = AllocateDevicePhysical(bytes, logic_device_id);
+    device_handle_ = device_allocation.handle;
+    device_mapping_bytes_ = device_allocation.mapped_bytes;
     device_va_ = static_cast<uint8_t *>(arena_va_) + slot_bytes_;
-    ACLTEST_CHECK_ACL(aclrtMapMem(device_va_, bytes, 0U, device_handle_, 0U));
+    ACLTEST_CHECK_ACL(aclrtMapMem(device_va_, device_mapping_bytes_, 0U, device_handle_, 0U));
+    device_mapped_ = true;
+    std::cerr << "fabric memory: logical_bytes=" << bytes_ << ", host_mapping_bytes=" << host_mapping_bytes_
+              << ", device_mapping_bytes=" << device_mapping_bytes_ << '\n';
   } catch (...) {
     Reset();
     throw;
@@ -164,18 +203,20 @@ void FabricMemoryPair::Initialize(size_t bytes, int32_t logic_device_id) {
 }
 
 void FabricMemoryPair::Reset() noexcept {
-  if (device_va_ != nullptr) {
+  if (device_mapped_ && device_va_ != nullptr) {
     LogCleanupError("aclrtUnmapMem(device)", aclrtUnmapMem(device_va_));
-    device_va_ = nullptr;
+    device_mapped_ = false;
   }
+  device_va_ = nullptr;
   if (device_handle_ != nullptr) {
     LogCleanupError("aclrtFreePhysical(device)", aclrtFreePhysical(device_handle_));
     device_handle_ = nullptr;
   }
-  if (host_va_ != nullptr) {
+  if (host_mapped_ && host_va_ != nullptr) {
     LogCleanupError("aclrtUnmapMem(host)", aclrtUnmapMem(host_va_));
-    host_va_ = nullptr;
+    host_mapped_ = false;
   }
+  host_va_ = nullptr;
   if (host_handle_ != nullptr) {
     LogCleanupError("aclrtFreePhysical(host)", aclrtFreePhysical(host_handle_));
     host_handle_ = nullptr;
@@ -187,6 +228,8 @@ void FabricMemoryPair::Reset() noexcept {
   arena_bytes_ = 0U;
   slot_bytes_ = 0U;
   bytes_ = 0U;
+  host_mapping_bytes_ = 0U;
+  device_mapping_bytes_ = 0U;
 }
 
 }  // namespace acltest

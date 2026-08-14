@@ -43,9 +43,14 @@ class FabricMemoryPair {
   }
 
  private:
+  struct PhysicalAllocation {
+    aclrtDrvMemHandle handle = nullptr;
+    size_t mapped_bytes = 0U;
+  };
+
   static aclrtPhysicalMemProp DefaultPhysicalProperty();
-  static aclrtDrvMemHandle AllocateHostPhysical(size_t bytes, int32_t logic_device_id);
-  static aclrtDrvMemHandle AllocateDevicePhysical(size_t bytes, int32_t logic_device_id);
+  static PhysicalAllocation AllocateHostPhysical(size_t bytes, int32_t logic_device_id);
+  static PhysicalAllocation AllocateDevicePhysical(size_t bytes, int32_t logic_device_id);
   static bool IsA3Soc();
   void ReserveArena(size_t bytes);
 
@@ -53,10 +58,14 @@ class FabricMemoryPair {
   size_t arena_bytes_ = 0U;
   size_t slot_bytes_ = 0U;
   size_t bytes_ = 0U;
+  size_t host_mapping_bytes_ = 0U;
+  size_t device_mapping_bytes_ = 0U;
   void *host_va_ = nullptr;
   void *device_va_ = nullptr;
   aclrtDrvMemHandle host_handle_ = nullptr;
   aclrtDrvMemHandle device_handle_ = nullptr;
+  bool host_mapped_ = false;
+  bool device_mapped_ = false;
 };
 
 }  // namespace acltest
