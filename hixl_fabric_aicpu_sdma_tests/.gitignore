@@ -1,0 +1,4 @@
+/build/
+/build_out/
+/third_party/
+/*.csv
