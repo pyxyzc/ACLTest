@@ -32,6 +32,11 @@
 
 它们不会覆盖 Fabric 测试的 `libacltest_sdma_kernel.*`。
 
+自定义 built-in AICPU 包不会因为复制到 `opp/built-in/op_impl/aicpu/kernel` 就被
+自动加载。安装脚本还会在当前 CANN 的 `conf/ascend_package_load.ini` 中登记该归档，
+让 TSD 在业务进程启动时把它发送并解压到 Device。登记块带有 AclTest 专用标记，卸载
+和清理脚本只移除该标记块，不修改 CANN 自带的 HIXL/Fabric 配置。
+
 ## 构建与安装
 
 构建依赖 CANN Runtime `>=9.0.0`，运行依赖 `>=8.5`。脚本优先使用
@@ -48,6 +53,10 @@ bash scripts/install_kernel.sh
 ```bash
 bash scripts/install_kernel.sh --force
 ```
+
+安装完成后需要重新启动 benchmark 进程，使 TSD 读取更新后的包配置。若只复制 JSON
+和 tar、没有上述登记，Host 仍能下发 kernel，但 Device 侧会因找不到
+`libacltest_malloc_sdma_kernel.so` 报 `errcode:11002, msg:open so failed`。
 
 ## 运行
 
@@ -79,5 +88,5 @@ bash scripts/uninstall_kernel.sh
 bash scripts/clear.sh
 ```
 
-两个脚本只删除本工程唯一命名的设备包；`clear.sh` 还会删除本目录下的 `build/` 和
-`build_out/`，不会删除 CSV、Fabric 测试或 HIXL 文件。
+两个脚本只删除本工程唯一命名的设备包及其 AclTest-owned TSD 登记块；`clear.sh` 还会
+删除本目录下的 `build/` 和 `build_out/`，不会删除 CSV、Fabric 测试或 HIXL 文件。

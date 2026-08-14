@@ -11,6 +11,7 @@ project(device_acltest_malloc_sdma LANGUAGES C CXX)
 init_cann_project(PRODUCT_SIDE "device")
 add_definitions(-DPRODUCT_SIDE_DEVICE -D_GLIBCXX_USE_CXX11_ABI=0)
 set(USE_CXX11_ABI OFF)
+set(CMAKE_SKIP_RPATH TRUE)
 add_cann_target_options()
 
 get_filename_component(ACLTEST_MALLOC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)

@@ -10,6 +10,8 @@ ascend_home="${ASCEND_HOME_PATH:-}"
 
 # shellcheck disable=SC1091
 source "${project_dir}/scripts/ascend_env.sh"
+# shellcheck disable=SC1091
+source "${project_dir}/scripts/package_registration.sh"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -42,4 +44,5 @@ fi
 json_target="${ascend_home}/opp/built-in/op_impl/aicpu/config/libacltest_malloc_sdma_kernel.json"
 archive_target="${ascend_home}/opp/built-in/op_impl/aicpu/kernel/acltest-malloc-sdma-compat.tar.gz"
 rm -f -- "${json_target}" "${archive_target}"
+acltest_malloc_unregister_package "${ascend_home}"
 echo "Removed malloc AclTest kernel files from ${ascend_home}; Fabric and HIXL files were untouched."
