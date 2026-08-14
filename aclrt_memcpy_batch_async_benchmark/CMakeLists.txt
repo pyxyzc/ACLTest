@@ -50,21 +50,6 @@ find_library(ASCENDCL_LIBRARY
         "/usr/local/Ascend/ascend-toolkit/latest/lib64"
 )
 
-find_path(ASCEND_HAL_INCLUDE_DIR
-    NAMES ascend_hal_base.h
-    HINTS
-        "${ASCEND_ROOT}/include"
-        "$ENV{ASCEND_ROOT}/include"
-        "$ENV{ASCEND_HOME_PATH}/include"
-        "$ENV{ASCEND_HOME}/include"
-        "$ENV{ASCEND_TOOLKIT_HOME}/include"
-        "/usr/local/Ascend/driver/include"
-        "/usr/local/Ascend/ascend-toolkit/latest/include"
-    PATH_SUFFIXES
-        ascend_hal/driver
-        driver
-)
-
 if(NOT ACL_INCLUDE_DIR)
     message(FATAL_ERROR
         "Cannot find acl/acl.h. Pass -DASCEND_ROOT=/path/to/ascend-toolkit/latest")
@@ -73,12 +58,6 @@ endif()
 if(NOT ASCENDCL_LIBRARY)
     message(FATAL_ERROR
         "Cannot find libascendcl.so. Pass -DASCEND_ROOT=/path/to/ascend-toolkit/latest")
-endif()
-
-if(NOT ASCEND_HAL_INCLUDE_DIR)
-    message(FATAL_ERROR
-        "Cannot find ascend_hal_base.h required by the path test. "
-        "Pass -DASCEND_HAL_INCLUDE_DIR=/path/to/ascend_hal/driver")
 endif()
 
 include(CheckCXXSourceCompiles)
@@ -102,35 +81,12 @@ int main() {
 }
 ]] ACLTEST_HAS_REQUIRED_BENCHMARK_APIS)
 
-set(CMAKE_REQUIRED_INCLUDES "${ACL_INCLUDE_DIR};${ASCEND_HAL_INCLUDE_DIR}")
-check_cxx_source_compiles([[#include <acl/acl.h>
-#include <ascend_hal_base.h>
-#include <cstdint>
-static_assert(static_cast<int32_t>(FEATURE_MEMCPY_BATCH_ASYNC) == 3);
-int main() {
-    auto device_info_fn = &aclrtGetDeviceInfo;
-    auto logic_id_fn = &aclrtGetLogicDevIdByUserDevId;
-    auto pointer_attr_fn = &aclrtPointerGetAttributes;
-    auto soc_name_fn = &aclrtGetSocName;
-    using HalSupportFeatureFn = decltype(&halSupportFeature);
-    return device_info_fn == nullptr || logic_id_fn == nullptr || pointer_attr_fn == nullptr ||
-           soc_name_fn == nullptr || sizeof(HalSupportFeatureFn) != sizeof(void*) ||
-           ACL_DEV_ATTR_NPU_ARCH == ACL_DEV_ATTR_HD_CONNECT_TYPE ||
-           ACL_HOST_DEVICE_CONNECT_TYPE_UB == ACL_HOST_DEVICE_CONNECT_TYPE_PCIE ||
-           ACL_MEM_LOCATION_TYPE_HOST == ACL_MEM_LOCATION_TYPE_UNREGISTERED;
-}
-]] ACLTEST_HAS_REQUIRED_PATH_PROBE_APIS)
 set(CMAKE_REQUIRED_INCLUDES)
 set(CMAKE_TRY_COMPILE_TARGET_TYPE "${_saved_try_compile_target_type}")
 
 if(NOT ACLTEST_HAS_REQUIRED_BENCHMARK_APIS)
     message(FATAL_ERROR
         "The selected CANN headers do not provide the batch memcpy and timeline Event APIs")
-endif()
-
-if(NOT ACLTEST_HAS_REQUIRED_PATH_PROBE_APIS)
-    message(FATAL_ERROR
-        "The selected ACL/HAL headers do not provide the APIs required by the path test")
 endif()
 
 add_executable(aclrt_memcpy_batch_bench
@@ -162,10 +118,5 @@ foreach(_target aclrt_memcpy_batch_bench aclrt_memcpy_batch_path_test)
     endif()
 endforeach()
 
-target_include_directories(aclrt_memcpy_batch_path_test SYSTEM PRIVATE
-    "${ASCEND_HAL_INCLUDE_DIR}"
-)
-
 message(STATUS "ACL include dir: ${ACL_INCLUDE_DIR}")
-message(STATUS "Ascend HAL include dir: ${ASCEND_HAL_INCLUDE_DIR}")
 message(STATUS "AscendCL library: ${ASCENDCL_LIBRARY}")

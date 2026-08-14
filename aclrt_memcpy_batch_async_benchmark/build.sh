@@ -8,10 +8,9 @@ output_dir="${project_dir}/build_out"
 jobs=8
 build_type=Release
 ascend_root="${ASCEND_HOME_PATH:-}"
-ascend_hal_include=""
 
 usage() {
-  echo "Usage: $0 [-j N] [--build-type Release|Debug] [--ascend-root PATH] [--ascend-hal-include PATH]"
+  echo "Usage: $0 [-j N] [--build-type Release|Debug] [--ascend-root PATH]"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -29,11 +28,6 @@ while [[ $# -gt 0 ]]; do
     --ascend-root)
       [[ $# -ge 2 ]] || { echo "--ascend-root requires a path" >&2; exit 2; }
       ascend_root="$2"
-      shift 2
-      ;;
-    --ascend-hal-include)
-      [[ $# -ge 2 ]] || { echo "--ascend-hal-include requires a path" >&2; exit 2; }
-      ascend_hal_include="$2"
       shift 2
       ;;
     -h|--help)
@@ -60,11 +54,6 @@ if [[ -n "${ascend_root}" && ! -d "${ascend_root}" ]]; then
   echo "Ascend root does not exist: ${ascend_root}" >&2
   exit 2
 fi
-if [[ -n "${ascend_hal_include}" && ! -d "${ascend_hal_include}" ]]; then
-  echo "Ascend HAL include directory does not exist: ${ascend_hal_include}" >&2
-  exit 2
-fi
-
 cmake_args=(
   -S "${project_dir}"
   -B "${build_dir}"
@@ -73,10 +62,6 @@ cmake_args=(
 if [[ -n "${ascend_root}" ]]; then
   cmake_args+=("-DASCEND_ROOT=${ascend_root}")
 fi
-if [[ -n "${ascend_hal_include}" ]]; then
-  cmake_args+=("-DASCEND_HAL_INCLUDE_DIR=${ascend_hal_include}")
-fi
-
 cmake "${cmake_args[@]}"
 cmake --build "${build_dir}" --parallel "${jobs}"
 

@@ -1,5 +1,4 @@
 #include <acl/acl.h>
-#include <ascend_hal_base.h>
 #include <dlfcn.h>
 
 #include <cstddef>
@@ -15,16 +14,25 @@
 
 namespace {
 
-// Keep these values aligned with the target Runtime/driver source. The static
-// assertion makes an enum ABI change a build failure instead of a wrong probe.
-static_assert(static_cast<int32_t>(FEATURE_MEMCPY_BATCH_ASYNC) == 3);
+// ABI values from the Runtime source being tested. They are intentionally local
+// because CANN 9.1 installation headers do not expose them in every package.
+constexpr int32_t kFeatureMemcpyBatchAsync = 3;
+constexpr int32_t kModuleTypeSystem = 0;
+constexpr int32_t kInfoTypeHdConnect = 40;
+constexpr int32_t kAclDevAttrNpuArch = 601;
 constexpr int64_t kA5NpuArch = 3510;
+constexpr int64_t kConnectPcie = 0;
+constexpr int64_t kConnectHccs = 1;
+constexpr int64_t kConnectUb = 2;
 constexpr size_t kProbeBytes = 4096U;
 
 enum class HostMemoryKind { kPinned, kPageable };
 enum class ConnectType { kUnknown, kPcie, kHccs, kUb };
 enum class ExpectedPath {
+    kA5Unconfirmed,
     kNotA5,
+    kDeviceIdMappingUnknown,
+    kConnectTypeUnknown,
     kDriverNotSupport,
     kLoopMemcpyAsync,
     kSyncMemcpyBatch,
@@ -35,6 +43,24 @@ struct Options {
     int32_t device_id = 0;
     HostMemoryKind host_memory = HostMemoryKind::kPinned;
     bool require_ub = false;
+};
+
+struct BoolProbe {
+    bool known = false;
+    bool value = false;
+    std::string detail;
+};
+
+struct DeviceIdProbe {
+    bool known = false;
+    int32_t logic_device_id = -1;
+    std::string detail;
+};
+
+struct ConnectProbe {
+    bool known = false;
+    ConnectType type = ConnectType::kUnknown;
+    std::string detail;
 };
 
 std::string RecentAclError()
@@ -55,6 +81,19 @@ std::string RecentAclError()
 void CheckAcl(const std::string& operation, aclError error)
 {
     if (error != ACL_SUCCESS) { ThrowAclError(operation, error); }
+}
+
+template <typename Function>
+Function ResolveFunction(const char* name)
+{
+    (void)dlerror();
+    void* symbol = dlsym(RTLD_DEFAULT, name);
+    const char* error = dlerror();
+    if (symbol == nullptr || error != nullptr) { return nullptr; }
+    static_assert(sizeof(Function) == sizeof(symbol));
+    Function function = nullptr;
+    std::memcpy(&function, &symbol, sizeof(function));
+    return function;
 }
 
 class RuntimeSession {
@@ -127,42 +166,86 @@ public:
 
     HostBuffer(const HostBuffer&) = delete;
     HostBuffer& operator=(const HostBuffer&) = delete;
-    void* get() const { return data_; }
 
 private:
     HostMemoryKind kind_ = HostMemoryKind::kPinned;
     void* data_ = nullptr;
 };
 
-struct DriverFeatureResult {
-    bool symbol_available = false;
-    bool feature_supported = false;
-    std::string detail;
-};
-
-DriverFeatureResult QueryDriverFeature(uint32_t logic_device_id)
+DeviceIdProbe QueryLogicDeviceId(int32_t user_device_id)
 {
-    DriverFeatureResult result;
-    (void)dlerror();
-    void* symbol = dlsym(RTLD_DEFAULT, "halSupportFeature");
-    const char* load_error = dlerror();
-    if (symbol == nullptr || load_error != nullptr) {
-        result.detail =
-            "halSupportFeature symbol is absent; NpuDriver::CheckIsSupportFeature returns false";
-        return result;
+    using GetLogicDeviceId = int32_t (*)(int32_t, int32_t*);
+    const char* const names[] = {"aclrtGetLogicDevIdByUserDevId", "rtGetLogicDevIdByUserDevId"};
+    for (const char* name : names) {
+        GetLogicDeviceId function = ResolveFunction<GetLogicDeviceId>(name);
+        if (function == nullptr) { continue; }
+        int32_t logic_device_id = -1;
+        const int32_t error = function(user_device_id, &logic_device_id);
+        if (error == 0 && logic_device_id >= 0) {
+            return {true, logic_device_id, std::string(name) + " succeeded"};
+        }
+        return {false, -1, std::string(name) + " failed, error=" + std::to_string(error)};
     }
+    return {false, -1, "user-to-logic Device ID conversion symbol is unavailable"};
+}
 
-    // Use the exact declaration from ascend_hal_base.h, but resolve it from the
-    // process at runtime so the executable does not add a HAL NEEDED entry.
-    using HalSupportFeature = decltype(&halSupportFeature);
-    static_assert(sizeof(HalSupportFeature) == sizeof(symbol));
-    HalSupportFeature function = nullptr;
-    std::memcpy(&function, &symbol, sizeof(function));
-    result.symbol_available = true;
-    result.feature_supported = function(logic_device_id, FEATURE_MEMCPY_BATCH_ASYNC);
-    result.detail = "halSupportFeature(logicDeviceId, FEATURE_MEMCPY_BATCH_ASYNC=3) returned ";
-    result.detail += result.feature_supported ? "true" : "false";
-    return result;
+BoolProbe QueryA5(uint32_t user_device_id, const char* soc_name)
+{
+    using GetDeviceInfo = int32_t (*)(uint32_t, int32_t, int64_t*);
+    GetDeviceInfo function = ResolveFunction<GetDeviceInfo>("aclrtGetDeviceInfo");
+    if (function != nullptr) {
+        int64_t npu_arch = -1;
+        const int32_t error = function(user_device_id, kAclDevAttrNpuArch, &npu_arch);
+        if (error == 0) {
+            return {true, npu_arch == kA5NpuArch,
+                    "aclrtGetDeviceInfo(NPU_ARCH)=" + std::to_string(npu_arch)};
+        }
+    }
+    if (soc_name != nullptr && std::string(soc_name).find("950") != std::string::npos) {
+        return {true, true, std::string("SoC name identifies A5: ") + soc_name};
+    }
+    return {false, false, "A5 cannot be confirmed by NPU_ARCH or SoC name"};
+}
+
+BoolProbe QueryDriverFeature(uint32_t logic_device_id)
+{
+    using HalSupportFeature = bool (*)(uint32_t, int32_t);
+    HalSupportFeature function = ResolveFunction<HalSupportFeature>("halSupportFeature");
+    if (function == nullptr) {
+        return {true, false,
+                "halSupportFeature symbol is absent; CheckIsSupportFeature returns false"};
+    }
+    const bool supported = function(logic_device_id, kFeatureMemcpyBatchAsync);
+    return {true, supported,
+            std::string("halSupportFeature(FEATURE_MEMCPY_BATCH_ASYNC=3)=") +
+                (supported ? "true" : "false")};
+}
+
+ConnectType ToConnectType(int64_t value)
+{
+    if (value == kConnectPcie) { return ConnectType::kPcie; }
+    if (value == kConnectHccs) { return ConnectType::kHccs; }
+    if (value == kConnectUb) { return ConnectType::kUb; }
+    return ConnectType::kUnknown;
+}
+
+ConnectProbe QueryConnectType(uint32_t logic_device_id)
+{
+    using HalGetDeviceInfo = int32_t (*)(uint32_t, int32_t, int32_t, int64_t*);
+    HalGetDeviceInfo function = ResolveFunction<HalGetDeviceInfo>("halGetDeviceInfo");
+    if (function == nullptr) {
+        return {false, ConnectType::kUnknown, "halGetDeviceInfo symbol is unavailable"};
+    }
+    int64_t value = -1;
+    const int32_t error =
+        function(logic_device_id, kModuleTypeSystem, kInfoTypeHdConnect, &value);
+    const ConnectType type = ToConnectType(value);
+    if (error != 0 || type == ConnectType::kUnknown) {
+        return {false, ConnectType::kUnknown,
+                "halGetDeviceInfo(HD_CONNECT_TYPE) failed, error=" + std::to_string(error) +
+                    ", value=" + std::to_string(value)};
+    }
+    return {true, type, "halGetDeviceInfo(HD_CONNECT_TYPE)=" + std::to_string(value)};
 }
 
 const char* ConnectTypeName(ConnectType type)
@@ -180,42 +263,17 @@ const char* ConnectTypeName(ConnectType type)
     return "unknown";
 }
 
-ConnectType ToConnectType(int64_t value)
-{
-    switch (value) {
-        case ACL_HOST_DEVICE_CONNECT_TYPE_PCIE:
-            return ConnectType::kPcie;
-        case ACL_HOST_DEVICE_CONNECT_TYPE_HCCS:
-            return ConnectType::kHccs;
-        case ACL_HOST_DEVICE_CONNECT_TYPE_UB:
-            return ConnectType::kUb;
-        default:
-            return ConnectType::kUnknown;
-    }
-}
-
-const char* MemoryTypeName(aclrtMemLocationType type)
-{
-    switch (type) {
-        case ACL_MEM_LOCATION_TYPE_HOST:
-            return "HOST_LOCKED_OR_REGISTERED";
-        case ACL_MEM_LOCATION_TYPE_DEVICE:
-            return "DEVICE";
-        case ACL_MEM_LOCATION_TYPE_UNREGISTERED:
-            return "HOST_UNREGISTERED";
-        case ACL_MEM_LOCATION_TYPE_MANAGED:
-            return "MANAGED";
-        case ACL_MEM_LOCATION_TYPE_HOST_NUMA:
-            return "HOST_NUMA";
-    }
-    return "UNKNOWN";
-}
-
 const char* PathName(ExpectedPath path)
 {
     switch (path) {
+        case ExpectedPath::kA5Unconfirmed:
+            return "INDETERMINATE_A5_UNCONFIRMED";
         case ExpectedPath::kNotA5:
             return "NOT_A5_API_IMPL_DAVID_PATH";
+        case ExpectedPath::kDeviceIdMappingUnknown:
+            return "INDETERMINATE_DEVICE_ID_MAPPING";
+        case ExpectedPath::kConnectTypeUnknown:
+            return "INDETERMINATE_CONNECT_TYPE";
         case ExpectedPath::kDriverNotSupport:
             return "RT_ERROR_DRV_NOT_SUPPORT_EXPECTED";
         case ExpectedPath::kLoopMemcpyAsync:
@@ -228,30 +286,28 @@ const char* PathName(ExpectedPath path)
     return "UNKNOWN";
 }
 
-constexpr ExpectedPath ClassifyPath(bool is_a5, bool driver_feature_supported,
-                                    ConnectType connect_type,
-                                    aclrtMemLocationType host_memory_type)
+constexpr ExpectedPath ClassifyPath(bool a5_known, bool is_a5, bool logic_id_known,
+                                    bool driver_feature_supported, bool connect_known,
+                                    ConnectType connect_type, bool host_registered)
 {
+    if (!a5_known) { return ExpectedPath::kA5Unconfirmed; }
     if (!is_a5) { return ExpectedPath::kNotA5; }
-    // This deliberately mirrors api_impl_david.cc:882, including the '!'.
+    if (!logic_id_known) { return ExpectedPath::kDeviceIdMappingUnknown; }
+    // Mirrors api_impl_david.cc:882, including the negation.
     if (driver_feature_supported) { return ExpectedPath::kDriverNotSupport; }
+    if (!connect_known) { return ExpectedPath::kConnectTypeUnknown; }
     if (connect_type != ConnectType::kUb) { return ExpectedPath::kLoopMemcpyAsync; }
-    if (host_memory_type == ACL_MEM_LOCATION_TYPE_UNREGISTERED) {
-        return ExpectedPath::kSyncMemcpyBatch;
-    }
+    if (!host_registered) { return ExpectedPath::kSyncMemcpyBatch; }
     return ExpectedPath::kUbBatchDma;
 }
 
-static_assert(ClassifyPath(false, false, ConnectType::kUb, ACL_MEM_LOCATION_TYPE_HOST) ==
-              ExpectedPath::kNotA5);
-static_assert(ClassifyPath(true, true, ConnectType::kUb, ACL_MEM_LOCATION_TYPE_HOST) ==
+static_assert(ClassifyPath(true, true, true, true, true, ConnectType::kUb, true) ==
               ExpectedPath::kDriverNotSupport);
-static_assert(ClassifyPath(true, false, ConnectType::kPcie, ACL_MEM_LOCATION_TYPE_HOST) ==
+static_assert(ClassifyPath(true, true, true, false, true, ConnectType::kPcie, true) ==
               ExpectedPath::kLoopMemcpyAsync);
-static_assert(ClassifyPath(true, false, ConnectType::kUb,
-                           ACL_MEM_LOCATION_TYPE_UNREGISTERED) ==
+static_assert(ClassifyPath(true, true, true, false, true, ConnectType::kUb, false) ==
               ExpectedPath::kSyncMemcpyBatch);
-static_assert(ClassifyPath(true, false, ConnectType::kUb, ACL_MEM_LOCATION_TYPE_HOST) ==
+static_assert(ClassifyPath(true, true, true, false, true, ConnectType::kUb, true) ==
               ExpectedPath::kUbBatchDma);
 
 uint64_t ParseUnsigned(const std::string& value, const std::string& name)
@@ -330,6 +386,8 @@ int main(int argc, char** argv)
     try {
         const Options options = ParseOptions(argc, argv);
         RuntimeSession runtime(options.device_id);
+        HostBuffer host_buffer(options.host_memory);
+        (void)host_buffer;
 
         int32_t current_device = -1;
         CheckAcl("aclrtGetDevice", aclrtGetDevice(&current_device));
@@ -337,50 +395,45 @@ int main(int argc, char** argv)
             throw std::runtime_error("current ACL device does not match --device");
         }
 
-        int32_t logic_device_id = -1;
-        CheckAcl("aclrtGetLogicDevIdByUserDevId",
-                 aclrtGetLogicDevIdByUserDevId(options.device_id, &logic_device_id));
+        const char* soc_name = aclrtGetSocName();
+        const BoolProbe a5 = QueryA5(static_cast<uint32_t>(options.device_id), soc_name);
+        const DeviceIdProbe logic_id = QueryLogicDeviceId(options.device_id);
 
-        int64_t npu_arch = -1;
-        CheckAcl("aclrtGetDeviceInfo(NPU_ARCH)",
-                 aclrtGetDeviceInfo(static_cast<uint32_t>(options.device_id),
-                                    ACL_DEV_ATTR_NPU_ARCH, &npu_arch));
-        const bool is_a5 = npu_arch == kA5NpuArch;
-
-        int64_t connect_value = -1;
-        ConnectType connect_type = ConnectType::kUnknown;
-        if (is_a5) {
-            CheckAcl("aclrtGetDeviceInfo(HD_CONNECT_TYPE)",
-                     aclrtGetDeviceInfo(static_cast<uint32_t>(options.device_id),
-                                        ACL_DEV_ATTR_HD_CONNECT_TYPE, &connect_value));
-            connect_type = ToConnectType(connect_value);
+        BoolProbe driver_feature;
+        ConnectProbe connect;
+        if (logic_id.known) {
+            driver_feature = QueryDriverFeature(static_cast<uint32_t>(logic_id.logic_device_id));
+            connect = QueryConnectType(static_cast<uint32_t>(logic_id.logic_device_id));
+        } else {
+            driver_feature.detail = "skipped because logical Device ID is unknown";
+            connect.detail = "skipped because logical Device ID is unknown";
         }
 
-        const DriverFeatureResult driver =
-            QueryDriverFeature(static_cast<uint32_t>(logic_device_id));
-        HostBuffer host_buffer(options.host_memory);
-        aclrtPtrAttributes host_attributes{};
-        CheckAcl("aclrtPointerGetAttributes(host)",
-                 aclrtPointerGetAttributes(host_buffer.get(), &host_attributes));
+        const bool host_registered = options.host_memory == HostMemoryKind::kPinned;
+        const ExpectedPath path =
+            ClassifyPath(a5.known, a5.value, logic_id.known, driver_feature.value,
+                         connect.known, connect.type, host_registered);
 
-        const ExpectedPath path = ClassifyPath(is_a5, driver.feature_supported, connect_type,
-                                               host_attributes.location.type);
-        const char* soc_name = aclrtGetSocName();
         std::cout << "MemcpyBatchAsync path precheck\n"
                   << "  user_device_id: " << options.device_id << '\n'
-                  << "  logic_device_id: " << logic_device_id << '\n'
+                  << "  logic_device_id: "
+                  << (logic_id.known ? std::to_string(logic_id.logic_device_id) : "unknown") << '\n'
+                  << "  device_id_detail: " << logic_id.detail << '\n'
                   << "  soc_name: " << (soc_name == nullptr ? "unknown" : soc_name) << '\n'
-                  << "  npu_arch: " << npu_arch << " (A5 expected: " << kA5NpuArch << ")\n"
-                  << "  api_impl_david_a5: " << (is_a5 ? "yes" : "no") << '\n'
-                  << "  driver_symbol_available: " << (driver.symbol_available ? "yes" : "no")
-                  << '\n'
+                  << "  a5_confirmed: "
+                  << (a5.known ? (a5.value ? "yes" : "no") : "unknown") << '\n'
+                  << "  a5_detail: " << a5.detail << '\n'
                   << "  driver_feature_supported: "
-                  << (driver.feature_supported ? "true" : "false") << '\n'
+                  << (driver_feature.known ? (driver_feature.value ? "true" : "false") : "unknown")
+                  << '\n'
                   << "  runtime_branch_gate_!feature: "
-                  << (!driver.feature_supported ? "true" : "false") << '\n'
-                  << "  driver_detail: " << driver.detail << '\n'
-                  << "  host_device_connect: " << ConnectTypeName(connect_type) << '\n'
-                  << "  host_pointer_type: " << MemoryTypeName(host_attributes.location.type)
+                  << (driver_feature.known ? (!driver_feature.value ? "true" : "false") : "unknown")
+                  << '\n'
+                  << "  driver_detail: " << driver_feature.detail << '\n'
+                  << "  host_device_connect: " << ConnectTypeName(connect.type) << '\n'
+                  << "  connect_detail: " << connect.detail << '\n'
+                  << "  host_pointer_type: "
+                  << (host_registered ? "HOST_LOCKED_OR_REGISTERED" : "HOST_UNREGISTERED")
                   << '\n'
                   << "VERDICT=" << PathName(path) << '\n';
 
