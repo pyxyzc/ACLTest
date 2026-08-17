@@ -28,6 +28,7 @@ constexpr size_t kMaxAutoIterations = 500U;
 
 enum class Direction { kHostToDevice, kDeviceToHost };
 enum class Method { kMemcpyLoop, kMemcpyBatch };
+enum class MethodMode { kLoop, kBatch, kBoth };
 
 struct Options {
     int32_t device_id = 0;
@@ -35,6 +36,7 @@ struct Options {
     std::vector<size_t> sizes = {512U,       1U * kKiB,   2U * kKiB,   4U * kKiB, 32U * kKiB,
                                  64U * kKiB, 256U * kKiB, 512U * kKiB, 1U * kMiB, 2U * kMiB};
     std::vector<size_t> counts = {128U};
+    MethodMode method_mode = MethodMode::kBoth;
     size_t warmup = 5U;
     bool automatic_iterations = true;
     size_t iterations = 0U;
@@ -63,6 +65,12 @@ struct MethodStats {
     double e2e_p95_us = 0.0;
     double execution_gib_per_second = 0.0;
     double e2e_gib_per_second = 0.0;
+
+    static MethodStats Unavailable()
+    {
+        const double value = std::numeric_limits<double>::quiet_NaN();
+        return {value, value, value, value, value, value, value, value};
+    }
 };
 
 struct Result {
@@ -71,11 +79,11 @@ struct Result {
     size_t count = 0U;
     size_t total_bytes = 0U;
     size_t iterations = 0U;
-    MethodStats loop;
-    MethodStats batch;
-    double submit_speedup = 0.0;
-    double execution_speedup = 0.0;
-    double e2e_speedup = 0.0;
+    MethodStats loop = MethodStats::Unavailable();
+    MethodStats batch = MethodStats::Unavailable();
+    double submit_speedup = std::numeric_limits<double>::quiet_NaN();
+    double execution_speedup = std::numeric_limits<double>::quiet_NaN();
+    double e2e_speedup = std::numeric_limits<double>::quiet_NaN();
 };
 
 std::string RecentAclError()
@@ -281,6 +289,20 @@ private:
 std::string DirectionName(Direction direction)
 {
     return direction == Direction::kHostToDevice ? "H2D" : "D2H";
+}
+
+std::string MethodModeName(MethodMode mode)
+{
+    if (mode == MethodMode::kLoop) { return "loop"; }
+    if (mode == MethodMode::kBatch) { return "batch"; }
+    return "both";
+}
+
+std::vector<Method> SelectedMethods(MethodMode mode)
+{
+    if (mode == MethodMode::kLoop) { return {Method::kMemcpyLoop}; }
+    if (mode == MethodMode::kBatch) { return {Method::kMemcpyBatch}; }
+    return {Method::kMemcpyLoop, Method::kMemcpyBatch};
 }
 
 size_t CheckedMultiply(size_t left, size_t right)
@@ -560,21 +582,9 @@ Result RunCase(const Options& options, Direction direction, size_t size, size_t 
                aclrtStream stream, EventTimer& event_timer)
 {
     CaseBuffers buffers(direction, options.device_id, size, count);
-    ValidateMethod(Method::kMemcpyLoop, buffers, stream, event_timer, options.timeout_ms);
-    ValidateMethod(Method::kMemcpyBatch, buffers, stream, event_timer, options.timeout_ms);
-
-    for (size_t iteration = 0U; iteration < options.warmup; ++iteration) {
-        if (iteration % 2U == 0U) {
-            (void)RunOnce(Method::kMemcpyLoop, buffers, stream, event_timer, options.timeout_ms,
-                          false);
-            (void)RunOnce(Method::kMemcpyBatch, buffers, stream, event_timer, options.timeout_ms,
-                          true);
-        } else {
-            (void)RunOnce(Method::kMemcpyBatch, buffers, stream, event_timer, options.timeout_ms,
-                          false);
-            (void)RunOnce(Method::kMemcpyLoop, buffers, stream, event_timer, options.timeout_ms,
-                          true);
-        }
+    const std::vector<Method> methods = SelectedMethods(options.method_mode);
+    for (Method method : methods) {
+        ValidateMethod(method, buffers, stream, event_timer, options.timeout_ms);
     }
 
     const size_t iterations = IterationCount(options, buffers.total_bytes());
@@ -582,18 +592,24 @@ Result RunCase(const Options& options, Direction direction, size_t size, size_t 
     std::vector<Timing> batch_timings;
     loop_timings.reserve(iterations);
     batch_timings.reserve(iterations);
-    for (size_t iteration = 0U; iteration < iterations; ++iteration) {
-        if (iteration % 2U == 0U) {
-            loop_timings.push_back(RunOnce(Method::kMemcpyLoop, buffers, stream, event_timer,
-                                           options.timeout_ms, false));
-            batch_timings.push_back(RunOnce(Method::kMemcpyBatch, buffers, stream, event_timer,
-                                            options.timeout_ms, true));
-        } else {
-            batch_timings.push_back(RunOnce(Method::kMemcpyBatch, buffers, stream, event_timer,
-                                            options.timeout_ms, false));
-            loop_timings.push_back(RunOnce(Method::kMemcpyLoop, buffers, stream, event_timer,
-                                           options.timeout_ms, true));
+    const auto run_iteration = [&](size_t iteration, bool record) {
+        const bool reverse = methods.size() > 1U && iteration % 2U != 0U;
+        for (size_t position = 0U; position < methods.size(); ++position) {
+            const Method method = methods[reverse ? methods.size() - 1U - position : position];
+            const bool execution_first =
+                methods.size() == 1U ? iteration % 2U != 0U : position != 0U;
+            const Timing timing =
+                RunOnce(method, buffers, stream, event_timer, options.timeout_ms, execution_first);
+            if (record) {
+                (method == Method::kMemcpyLoop ? loop_timings : batch_timings).push_back(timing);
+            }
         }
+    };
+    for (size_t iteration = 0U; iteration < options.warmup; ++iteration) {
+        run_iteration(iteration, false);
+    }
+    for (size_t iteration = 0U; iteration < iterations; ++iteration) {
+        run_iteration(iteration, true);
     }
 
     Result result;
@@ -602,15 +618,17 @@ Result RunCase(const Options& options, Direction direction, size_t size, size_t 
     result.count = count;
     result.total_bytes = buffers.total_bytes();
     result.iterations = iterations;
-    result.loop = Summarize(loop_timings, buffers.total_bytes());
-    result.batch = Summarize(batch_timings, buffers.total_bytes());
-    if (result.batch.submit_p50_us > 0.0) {
+    const bool has_loop = !loop_timings.empty();
+    const bool has_batch = !batch_timings.empty();
+    if (has_loop) { result.loop = Summarize(loop_timings, buffers.total_bytes()); }
+    if (has_batch) { result.batch = Summarize(batch_timings, buffers.total_bytes()); }
+    if (has_loop && has_batch && result.batch.submit_p50_us > 0.0) {
         result.submit_speedup = result.loop.submit_p50_us / result.batch.submit_p50_us;
     }
-    if (result.batch.execution_p50_us > 0.0) {
+    if (has_loop && has_batch && result.batch.execution_p50_us > 0.0) {
         result.execution_speedup = result.loop.execution_p50_us / result.batch.execution_p50_us;
     }
-    if (result.batch.e2e_p50_us > 0.0) {
+    if (has_loop && has_batch && result.batch.e2e_p50_us > 0.0) {
         result.e2e_speedup = result.loop.e2e_p50_us / result.batch.e2e_p50_us;
     }
     return result;
@@ -701,6 +719,14 @@ std::vector<size_t> ParseCounts(const std::string& value)
     return counts;
 }
 
+MethodMode ParseMethodMode(const std::string& value)
+{
+    if (value == "loop") { return MethodMode::kLoop; }
+    if (value == "batch") { return MethodMode::kBatch; }
+    if (value == "both") { return MethodMode::kBoth; }
+    throw std::invalid_argument("--method must be loop, batch, or both");
+}
+
 std::string TakeValue(int argc, char** argv, int* index, const std::string& argument)
 {
     const size_t equals = argument.find('=');
@@ -720,6 +746,7 @@ void PrintUsage(const char* program)
                  "512K,1M,2M)\n"
               << "  --counts LIST         comma-separated batch counts\n"
               << "                        (default: 128)\n"
+              << "  --method VALUE        loop, batch, or both (default: both)\n"
               << "  --warmup N            warmup pairs per case (default: 5)\n"
               << "  --iterations auto|N   measured pairs (default: auto)\n"
               << "  --target-bytes SIZE   bytes per method in auto mode (default: 256M)\n"
@@ -758,6 +785,8 @@ Options ParseOptions(int argc, char** argv)
             options.sizes = ParseSizes(TakeValue(argc, argv, &index, argument));
         } else if (name == "--counts") {
             options.counts = ParseCounts(TakeValue(argc, argv, &index, argument));
+        } else if (name == "--method") {
+            options.method_mode = ParseMethodMode(TakeValue(argc, argv, &index, argument));
         } else if (name == "--warmup") {
             options.warmup =
                 static_cast<size_t>(ParseUnsigned(TakeValue(argc, argv, &index, argument), name));
@@ -856,7 +885,8 @@ void WriteCsv(const std::string& path, const std::vector<Result>& results)
 
 void PrintConfiguration(const Options& options)
 {
-    std::cout << "device=" << options.device_id << ", warmup=" << options.warmup
+    std::cout << "device=" << options.device_id
+              << ", method=" << MethodModeName(options.method_mode) << ", warmup=" << options.warmup
               << ", timeout_ms=" << options.timeout_ms << ", iterations=";
     if (options.automatic_iterations) {
         std::cout << "auto (target " << FormatBytes(options.target_bytes) << ", clamp "
@@ -868,8 +898,12 @@ void PrintConfiguration(const Options& options)
               << "Timing: submit/e2e use an Event-free pass; execution uses a separate, "
                  "identical timeline-Event pass\n"
               << "Columns: l=aclrtMemcpyAsync loop, b=aclrtMemcpyBatchAsync, "
-                 "s=submit, x=execution, e=e2e\n"
-              << "Speedup: loop / batch (>1 means aclrtMemcpyBatchAsync is faster)\n\n";
+                 "s=submit, x=execution, e=e2e\n";
+    if (options.method_mode == MethodMode::kBoth) {
+        std::cout << "Speedup: loop / batch (>1 means aclrtMemcpyBatchAsync is faster)\n\n";
+    } else {
+        std::cout << "Speedup: not computed in single-method mode\n\n";
+    }
 }
 
 }  // namespace
