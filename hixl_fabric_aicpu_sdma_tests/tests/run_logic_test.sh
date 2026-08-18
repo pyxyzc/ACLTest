@@ -21,4 +21,10 @@ g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic \
   -o "${test_dir}/fabric_memory_layout_test"
 "${test_dir}/fabric_memory_layout_test"
 
+g++ -std=c++17 -O2 -Wall -Wextra -Wpedantic \
+  -I"${project_dir}/include" \
+  "${project_dir}/tests/soc_support_test.cc" \
+  -o "${test_dir}/soc_support_test"
+"${test_dir}/soc_support_test"
+
 bash "${project_dir}/tests/package_registration_test.sh"

@@ -28,6 +28,7 @@
 #include "acltest/aicpu_batch_launcher.h"
 #include "acltest/benchmark_logic.h"
 #include "acltest/fabric_memory.h"
+#include "acltest/soc_support.h"
 
 namespace acltest {
 namespace {
@@ -177,17 +178,6 @@ double ElapsedUs(Clock::time_point begin, Clock::time_point end)
 std::string DirectionName(TransferDirection direction)
 {
     return direction == TransferDirection::kDeviceToHost ? "D2H" : "H2D";
-}
-
-bool IsA3Soc(const char *name)
-{
-    if (name == nullptr) { return false; }
-    constexpr std::array<const char *, 6U> kNames = {
-        "Ascend910_9391", "Ascend910_9381", "Ascend910_9392",
-        "Ascend910_9382", "Ascend910_9372", "Ascend910_9362",
-    };
-    return std::any_of(kNames.begin(), kNames.end(),
-                       [name](const char *candidate) { return std::string(name) == candidate; });
 }
 
 std::string KernelJsonPath(const std::string &root)
@@ -586,9 +576,9 @@ int Run(int argc, char **argv)
 
     RuntimeGuard runtime(options.device_id);
     const char *soc_name = aclrtGetSocName();
-    if (!IsA3Soc(soc_name)) {
+    if (!IsSupportedDirectRtsqSoc(soc_name)) {
         throw std::runtime_error(
-            std::string("AICPU direct RTSQ benchmark supports A3 only; detected SoC: ") +
+            std::string("AICPU direct RTSQ benchmark supports A3/A5 only; detected SoC: ") +
             (soc_name == nullptr ? "<unknown>" : soc_name));
     }
     std::cout << "device=" << options.device_id << " soc=" << soc_name

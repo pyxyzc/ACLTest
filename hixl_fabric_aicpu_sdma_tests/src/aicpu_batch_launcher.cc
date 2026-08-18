@@ -71,7 +71,7 @@ void AicpuBatchLauncher::CreateExecutionResources()
     ACLTEST_CHECK_ACL(aclrtCreateNotify(&notify_, ACL_NOTIFY_DEVICE_USE_ONLY));
     ACLTEST_CHECK_ACL(aclrtGetNotifyId(notify_, &notify_id_));
     if (notify_id_ >= kNotifyIdLimit) {
-        throw std::runtime_error("runtime notify id exceeds the A3 13-bit NotifyRecord ABI");
+        throw std::runtime_error("runtime notify id exceeds the A3/A5 13-bit NotifyRecord ABI");
     }
     transfer_context_key_ = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(notify_));
 }
@@ -114,7 +114,7 @@ void AicpuBatchLauncher::BuildRtsqParam(uint32_t task_count, AicpuKernelParam &p
     int32_t stream_id = -1;
     ACLTEST_CHECK_ACL(aclrtStreamGetId(worker_stream_, &stream_id));
     if (stream_id < 0 || stream_id > std::numeric_limits<uint16_t>::max()) {
-        throw std::runtime_error("worker stream id exceeds the A3 SQE ABI");
+        throw std::runtime_error("worker stream id exceeds the A3/A5 SQE ABI");
     }
     uint32_t sq_id = 0U;
     if (rtStreamGetSqid(reinterpret_cast<rtStream_t>(worker_stream_), &sq_id) != RT_ERROR_NONE) {
