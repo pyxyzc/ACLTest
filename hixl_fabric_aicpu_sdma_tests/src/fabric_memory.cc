@@ -18,6 +18,7 @@
 #include <string>
 #include "acltest/acl_check.h"
 #include "acltest/fabric_memory_layout.h"
+#include "acltest/soc_support.h"
 
 extern "C" {
 __attribute__((weak)) aclError aclrtReserveMemAddressNoUCMemory(void **vir_ptr, size_t size,
@@ -116,10 +117,17 @@ FabricMemoryPair::PhysicalAllocation FabricMemoryPair::AllocateHostPhysical(size
     }
 
     aclrtPhysicalMemProp property = DefaultPhysicalProperty();
-    property.memAttr = ACL_MEM_P2P_HUGE1G;
+    const bool is_a5 = IsA5Soc();
+    // A5 does not support ACL_MEM_P2P_HUGE1G for Host physical memory.
+    // Use the supported 2-MiB P2P attribute while retaining the 1-GiB VMM slot.
+    property.memAttr = is_a5 ? ACL_MEM_P2P_HUGE : ACL_MEM_P2P_HUGE1G;
     property.location.type = ACL_MEM_LOCATION_TYPE_HOST_NUMA;
     property.location.id =
         static_cast<uint32_t>((physical_device_id / kDevicesPerChip) * kNumaNodeStep);
+    if (is_a5) {
+        std::cerr << "fabric memory: A5 Host physical allocation uses ACL_MEM_P2P_HUGE "
+                     "(2-MiB granularity)\n";
+    }
     aclError last_error = ACL_SUCCESS;
     for (const bool use_numa : {true, false}) {
         if (!use_numa) {
@@ -131,6 +139,11 @@ FabricMemoryPair::PhysicalAllocation FabricMemoryPair::AllocateHostPhysical(size
         const aclError error = aclrtMallocPhysical(&handle, allocation_bytes, &property, 0U);
         if (error == ACL_SUCCESS) { return {handle, allocation_bytes}; }
         last_error = error;
+    }
+
+    if (is_a5) {
+        ACLTEST_CHECK_ACL(last_error);
+        return {};
     }
 
     property.memAttr = ACL_MEM_P2P_HUGE;
@@ -146,13 +159,13 @@ FabricMemoryPair::PhysicalAllocation FabricMemoryPair::AllocateHostPhysical(size
 bool FabricMemoryPair::IsA3Soc()
 {
     const char *name = aclrtGetSocName();
-    if (name == nullptr) { return false; }
-    constexpr std::array<const char *, 6U> kA3Names = {
-        "Ascend910_9391", "Ascend910_9381", "Ascend910_9392",
-        "Ascend910_9382", "Ascend910_9372", "Ascend910_9362",
-    };
-    return std::any_of(kA3Names.begin(), kA3Names.end(),
-                       [name](const char *candidate) { return name == std::string(candidate); });
+    return name != nullptr && IsA3SocName(name);
+}
+
+bool FabricMemoryPair::IsA5Soc()
+{
+    const char *name = aclrtGetSocName();
+    return name != nullptr && IsA5SocName(name);
 }
 
 void FabricMemoryPair::ReserveArena(size_t bytes)

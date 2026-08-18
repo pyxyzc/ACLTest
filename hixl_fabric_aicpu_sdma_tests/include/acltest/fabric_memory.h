@@ -47,6 +47,7 @@ private:
     static PhysicalAllocation AllocateHostPhysical(size_t bytes, int32_t logic_device_id);
     static PhysicalAllocation AllocateDevicePhysical(size_t bytes, int32_t logic_device_id);
     static bool IsA3Soc();
+    static bool IsA5Soc();
     void ReserveArena(size_t bytes);
 
     void *arena_va_ = nullptr;

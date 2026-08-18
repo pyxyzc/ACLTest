@@ -105,6 +105,9 @@ VMM 物理内存的申请粒度由 `aclrtMemGetAllocationGranularity` 按 Host/D
 小 IO benchmark 中出现 `aclrtMapMem(...)=507899`。启动时会打印逻辑长度和两侧
 实际映射长度，便于确认运行时采用的粒度。
 
+A5 的 Host 物理内存暂时使用 `ACL_MEM_P2P_HUGE`（2 MiB 粒度），因为 A5 不支持
+Host 上的 `ACL_MEM_P2P_HUGE1G`；VMM 地址空间仍按完整的 1 GiB slot 预留和映射。
+
 默认扫描 D2H 和 H2D，IO size 为 `512B,1K,2K,4K,32K,64K,256K,512K,1M,2M`，固定 IO count 为 128：
 
 ```bash
