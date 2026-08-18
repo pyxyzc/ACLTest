@@ -1,0 +1,9 @@
+{
+  "AclTestA5HalTest": {
+    "opInfo": {
+      "functionName": "AclTestA5HalTest",
+      "kernelSo": "libacltest_a5_hal_test.so",
+      "opKernelLib": "AICPUKernel"
+    }
+  }
+}
