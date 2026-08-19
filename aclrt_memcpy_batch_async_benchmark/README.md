@@ -101,7 +101,37 @@ source /usr/local/Ascend/ascend-toolkit/latest/set_env.sh
 A5 UB Batch DMA 单算子和 ACL Graph/Software SQ 路径；`9.1.0-beta.2.pre`、
 `9.1.0-beta.3` 只有较早的单算子基础版本，不能只根据 test 的单算子结论外推 Graph 路径。
 
-## 运行
+## 固定 shard 场景 trace benchmark
+
+新增的 `aclrt_memcpy_shard_bench` 是独立入口，默认每个 shard `176 KiB`，每轮下发 `460` 个
+shard，总流量 `82,903,040` bytes；默认采集 10 轮。默认测试 H2D，并同时运行两种方案：
+
+- `loop`：对 460 个 shard 逐个调用 `aclrtMemcpyAsync`；每个 shard 产生一条 `submit` 记录；
+- `batch`：对 460 个 shard 调用一次 `aclrtMemcpyBatchAsync`；产生一条覆盖整个 batch API 调用的
+  `submit` 记录；
+- 每种方案在所有 shard 下发后产生一条 `sync` 记录，只覆盖 `aclrtSynchronizeStreamWithTimeout`；
+- 不记录端到端区间，不插入 Event；所有时间戳都是 Host 单调时钟的相对纳秒值。
+
+batch API 本身只有一个 Host 下发调用，无法得到 460 个独立的 API 下发区间，因此 batch 的
+`submit` 行使用 `shard_index=-1, shard_count=460` 表示一次覆盖 460 个 shard 的调用。CSV 的
+原始 trace 保留每条记录的 `start_ns/end_ns/duration_us`，默认写入 `shard_io_trace.csv`。
+
+```bash
+./build_out/bin/aclrt_memcpy_shard_bench \
+  --device 0 --method both --direction h2d \
+  --io-size 176K --warmup 0 --rounds 10 --csv shard_io_trace.csv
+```
+
+`--io-size` 可以改每个 shard 的 IO 大小，例如 `--io-size 4K`；`--rounds N` 控制有效采样轮数，
+每轮都会重新下发 460 个 shard，并在 CSV 的 `iteration` 列标识轮次。`--iterations N` 仍作为
+兼容别名保留。也可以用 `--direction d2h` 或 `--direction both`，以及 `--method loop`、
+`--method batch` 单独采集一种方案。构建脚本会同时安装这个新入口：
+
+```text
+build_out/bin/aclrt_memcpy_shard_bench
+```
+
+## 原有 sweep benchmark
 
 默认扫描 `512B,1K,2K,4K,32K,64K,256K,512K,1M,2M`，batch count 固定为 128，
 方向为 H2D 和 D2H，与仓库中已有 copy benchmark 的默认 case 保持一致：

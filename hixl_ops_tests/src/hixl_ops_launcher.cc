@@ -11,14 +11,21 @@
 
 #include "acltest/hixl_ops_launcher.h"
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <cstring>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
+#include <sys/stat.h>
 #include <thread>
+#include <unistd.h>
 #include "acltest/acl_check.h"
 #include "runtime/rt_external_stream.h"
+
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
 
 namespace acltest {
 namespace {
@@ -49,6 +56,37 @@ void LoadFunction(aclrtBinHandle binary, const char *name, aclrtFuncHandle &func
     }
 }
 
+std::string ResolveReadableRegularFile(const std::string &path)
+{
+    char resolved_path[PATH_MAX] = {0};
+    errno = 0;
+    if (realpath(path.c_str(), resolved_path) == nullptr) {
+        const int error = errno;
+        throw std::runtime_error("HIXL kernel JSON cannot be resolved: path=" + path +
+                                 ", errno=" + std::to_string(error) + " (" +
+                                 std::strerror(error) + ")");
+    }
+
+    struct stat file_status {};
+    if (stat(resolved_path, &file_status) != 0) {
+        const int error = errno;
+        throw std::runtime_error("HIXL kernel JSON cannot be stat'ed: path=" +
+                                 std::string(resolved_path) + ", errno=" +
+                                 std::to_string(error) + " (" + std::strerror(error) + ")");
+    }
+    if (!S_ISREG(file_status.st_mode)) {
+        throw std::runtime_error("HIXL kernel JSON is not a regular file: " +
+                                 std::string(resolved_path));
+    }
+    if (access(resolved_path, R_OK) != 0) {
+        const int error = errno;
+        throw std::runtime_error("HIXL kernel JSON is not readable: path=" +
+                                 std::string(resolved_path) + ", errno=" +
+                                 std::to_string(error) + " (" + std::strerror(error) + ")");
+    }
+    return resolved_path;
+}
+
 }  // namespace
 
 HixlOpsLauncher::~HixlOpsLauncher() { Shutdown(); }
@@ -58,13 +96,18 @@ void HixlOpsLauncher::LoadKernel(const std::string &kernel_json)
     if (kernel_json.empty()) {
         throw std::invalid_argument("official HIXL kernel JSON path cannot be empty");
     }
+    const std::string resolved_kernel_json = ResolveReadableRegularFile(kernel_json);
     aclrtBinaryLoadOption option{};
     option.type = ACL_RT_BINARY_LOAD_OPT_CPU_KERNEL_MODE;
     option.value.cpuKernelMode = 0U;
     aclrtBinaryLoadOptions options{};
     options.numOpt = 1U;
     options.options = &option;
-    ACLTEST_CHECK_ACL(aclrtBinaryLoadFromFile(kernel_json.c_str(), &options, &binary_));
+    const aclError load_error =
+        aclrtBinaryLoadFromFile(resolved_kernel_json.c_str(), &options, &binary_);
+    if (load_error != ACL_SUCCESS) {
+        throw AclException("aclrtBinaryLoadFromFile(" + resolved_kernel_json + ")", load_error);
+    }
     LoadFunction(binary_, kBatchReadFunction, batch_read_);
     LoadFunction(binary_, kBatchWriteFunction, batch_write_);
     LoadFunction(binary_, kSyncContextFunction, sync_context_);

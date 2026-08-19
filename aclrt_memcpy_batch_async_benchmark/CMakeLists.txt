@@ -97,7 +97,11 @@ add_executable(aclrt_memcpy_batch_path_test
     src/memcpy_batch_path_test.cpp
 )
 
-foreach(_target aclrt_memcpy_batch_bench aclrt_memcpy_batch_path_test)
+add_executable(aclrt_memcpy_shard_bench
+    src/shard_io_benchmark.cpp
+)
+
+foreach(_target aclrt_memcpy_batch_bench aclrt_memcpy_batch_path_test aclrt_memcpy_shard_bench)
     target_include_directories(${_target} PRIVATE
         "${ACL_INCLUDE_DIR}"
     )

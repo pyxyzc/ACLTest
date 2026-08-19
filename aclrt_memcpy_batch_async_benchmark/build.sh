@@ -66,7 +66,7 @@ cmake "${cmake_args[@]}"
 cmake --build "${build_dir}" --parallel "${jobs}"
 
 mkdir -p "${output_dir}/bin"
-executables=(aclrt_memcpy_batch_bench aclrt_memcpy_batch_path_test)
+executables=(aclrt_memcpy_batch_bench aclrt_memcpy_batch_path_test aclrt_memcpy_shard_bench)
 for executable in "${executables[@]}"; do
   install -m 0755 "${build_dir}/${executable}" "${output_dir}/bin/${executable}"
 done
