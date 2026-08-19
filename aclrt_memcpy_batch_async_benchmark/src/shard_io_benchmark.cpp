@@ -80,6 +80,7 @@ struct SummaryRow {
     Method method = Method::kLoop;
     Phase phase = Phase::kSubmitApi;
     size_t samples = 0U;
+    double avg_us = 0.0;
     double p50_us = 0.0;
     double p95_us = 0.0;
 };
@@ -382,10 +383,10 @@ std::string FormatBytes(size_t bytes)
     return output.str();
 }
 
-std::string FormatPercentiles(const SummaryRow& row)
+std::string FormatMicroseconds(double value)
 {
     std::ostringstream output;
-    output << std::fixed << std::setprecision(2) << row.p50_us << '/' << row.p95_us;
+    output << std::fixed << std::setprecision(2) << value;
     return output.str();
 }
 
@@ -560,11 +561,19 @@ double Percentile(std::vector<double> samples, double percentile)
     return samples[lower] + (samples[upper] - samples[lower]) * fraction;
 }
 
+double Average(const std::vector<double>& samples)
+{
+    if (samples.empty()) { throw std::invalid_argument("cannot average empty samples"); }
+    double total = 0.0;
+    for (double sample : samples) { total += sample; }
+    return total / static_cast<double>(samples.size());
+}
+
 SummaryRow MakeSummary(size_t size_bytes, Direction direction, Method method, Phase phase,
                        const std::vector<double>& samples)
 {
-    return {size_bytes, direction, method, phase, samples.size(), Percentile(samples, 0.50),
-            Percentile(samples, 0.95)};
+    return {size_bytes, direction, method, phase, samples.size(), Average(samples),
+            Percentile(samples, 0.50), Percentile(samples, 0.95)};
 }
 
 void AddMethodSummaries(size_t size_bytes, Direction direction, Method method,
@@ -754,30 +763,39 @@ void WriteSummary(const std::string& path, const std::vector<SummaryRow>& summar
 {
     std::ofstream output(path);
     if (!output) { throw std::runtime_error("cannot open summary CSV: " + path); }
-    output << "size_bytes,direction,method,metric,samples,p50_us,p95_us\n";
+    output << "size_bytes,direction,method,metric,samples,avg_us,p50_us,p95_us\n";
     output << std::fixed << std::setprecision(6);
     for (const SummaryRow& row : summary) {
         output << row.size_bytes << ',' << DirectionName(row.direction) << ','
                << MethodName(row.method) << ',' << PhaseName(row.phase) << ',' << row.samples
-               << ',' << row.p50_us << ',' << row.p95_us << '\n';
+               << ',' << row.avg_us << ',' << row.p50_us << ',' << row.p95_us << '\n';
     }
 }
 
 void PrintSummary(const std::vector<SummaryRow>& summary)
 {
-    std::cout << "\nSummary (microseconds, p50/p95)\n"
+    std::cout << "\nSummary (microseconds)\n"
               << std::left << std::setw(8) << "size" << std::setw(8) << "dir" << std::setw(8)
-              << "method" << std::setw(19) << "submit_api" << std::setw(19) << "submit_round"
-              << std::setw(19) << "sync" << '\n';
-    std::cout << std::string(81U, '-') << '\n';
+              << "method" << std::setw(12) << "api_avg" << std::setw(12) << "api_p50"
+              << std::setw(12) << "api_p95" << std::setw(14) << "round_avg" << std::setw(14)
+              << "round_p50" << std::setw(14) << "round_p95" << std::setw(12) << "sync_avg"
+              << std::setw(12) << "sync_p50" << std::setw(12) << "sync_p95" << '\n';
+    std::cout << std::string(116U, '-') << '\n';
     for (size_t index = 0U; index + 2U < summary.size(); index += 3U) {
         const SummaryRow& api = summary[index];
         const SummaryRow& round = summary[index + 1U];
         const SummaryRow& sync = summary[index + 2U];
         std::cout << std::left << std::setw(8) << FormatBytes(api.size_bytes) << std::setw(8)
                   << DirectionName(api.direction) << std::setw(8) << MethodName(api.method)
-                  << std::setw(19) << FormatPercentiles(api) << std::setw(19)
-                  << FormatPercentiles(round) << std::setw(19) << FormatPercentiles(sync) << '\n';
+                  << std::setw(12) << FormatMicroseconds(api.avg_us) << std::setw(12)
+                  << FormatMicroseconds(api.p50_us) << std::setw(12)
+                  << FormatMicroseconds(api.p95_us) << std::setw(14)
+                  << FormatMicroseconds(round.avg_us) << std::setw(14)
+                  << FormatMicroseconds(round.p50_us) << std::setw(14)
+                  << FormatMicroseconds(round.p95_us) << std::setw(12)
+                  << FormatMicroseconds(sync.avg_us) << std::setw(12)
+                  << FormatMicroseconds(sync.p50_us) << std::setw(12)
+                  << FormatMicroseconds(sync.p95_us) << '\n';
     }
 }
 
