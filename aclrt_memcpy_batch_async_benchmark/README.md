@@ -117,7 +117,8 @@ A5 UB Batch DMA 单算子和 ACL Graph/Software SQ 路径；`9.1.0-beta.2.pre`�
 
 汇总 CSV 使用 `size_bytes,direction,method,metric,samples,p50_us,p95_us` 字段；原始 trace CSV
 保留每条区间的 `start_ns/end_ns/duration_us`，并额外记录 round、method 和 io_index。loop 与
-batch 每轮成对执行，并逐轮交替先后顺序。
+batch 每轮成对执行，并逐轮交替先后顺序。程序结束前也会在命令行打印按 size、方向和 method
+聚合的简洁表格，列出 `submit_api`、`submit_round` 和 `sync` 的 `p50/p95`。
 
 ```bash
 ./build_out/bin/aclrt_memcpy_shard_bench \

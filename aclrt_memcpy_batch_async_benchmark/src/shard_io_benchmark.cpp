@@ -369,6 +369,26 @@ std::string PhaseName(Phase phase)
     return "sync";
 }
 
+std::string FormatBytes(size_t bytes)
+{
+    std::ostringstream output;
+    if (bytes % (kKiB * kKiB) == 0U) {
+        output << bytes / (kKiB * kKiB) << 'M';
+    } else if (bytes % kKiB == 0U) {
+        output << bytes / kKiB << 'K';
+    } else {
+        output << bytes << 'B';
+    }
+    return output.str();
+}
+
+std::string FormatPercentiles(const SummaryRow& row)
+{
+    std::ostringstream output;
+    output << std::fixed << std::setprecision(2) << row.p50_us << '/' << row.p95_us;
+    return output.str();
+}
+
 std::vector<Method> SelectedMethods(MethodMode mode)
 {
     if (mode == MethodMode::kLoop) { return {Method::kLoop}; }
@@ -743,6 +763,24 @@ void WriteSummary(const std::string& path, const std::vector<SummaryRow>& summar
     }
 }
 
+void PrintSummary(const std::vector<SummaryRow>& summary)
+{
+    std::cout << "\nSummary (microseconds, p50/p95)\n"
+              << std::left << std::setw(8) << "size" << std::setw(8) << "dir" << std::setw(8)
+              << "method" << std::setw(19) << "submit_api" << std::setw(19) << "submit_round"
+              << std::setw(19) << "sync" << '\n';
+    std::cout << std::string(81U, '-') << '\n';
+    for (size_t index = 0U; index + 2U < summary.size(); index += 3U) {
+        const SummaryRow& api = summary[index];
+        const SummaryRow& round = summary[index + 1U];
+        const SummaryRow& sync = summary[index + 2U];
+        std::cout << std::left << std::setw(8) << FormatBytes(api.size_bytes) << std::setw(8)
+                  << DirectionName(api.direction) << std::setw(8) << MethodName(api.method)
+                  << std::setw(19) << FormatPercentiles(api) << std::setw(19)
+                  << FormatPercentiles(round) << std::setw(19) << FormatPercentiles(sync) << '\n';
+    }
+}
+
 std::vector<Method> RoundOrder(const std::vector<Method>& methods, size_t round)
 {
     if (methods.size() == 2U && round % 2U != 0U) {
@@ -823,6 +861,7 @@ int main(int argc, char** argv)
 
         WriteSummary(options.summary_path, summary);
         WriteTrace(options.trace_path, trace);
+        PrintSummary(summary);
         std::cout << "summary_rows=" << summary.size() << ", trace_rows=" << trace.size()
                   << "\nSummary written to " << options.summary_path << "\nTrace written to "
                   << options.trace_path << '\n';
