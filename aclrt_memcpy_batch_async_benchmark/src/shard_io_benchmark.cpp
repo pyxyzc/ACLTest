@@ -1,5 +1,6 @@
 #include <acl/acl.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -18,39 +19,79 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
-constexpr size_t kDefaultShardBytes = 176U * 1024U;
-constexpr size_t kShardCount = 460U;
+constexpr size_t kKiB = 1024U;
+constexpr size_t kIoCount = 3U;
+constexpr size_t kFirstIoBytes = 16U * kKiB;
+constexpr size_t kLastIoBytes = 256U * kKiB;
+constexpr size_t kIoStepBytes = 16U * kKiB;
+constexpr size_t kDefaultWarmup = 10U;
+constexpr size_t kDefaultRounds = 100U;
 constexpr int32_t kDefaultTimeoutMs = 60000;
-constexpr size_t kDefaultRounds = 10U;
 
 enum class Direction { kHostToDevice, kDeviceToHost };
 enum class Method { kLoop, kBatch };
 enum class MethodMode { kBoth, kLoop, kBatch };
+enum class Phase { kSubmitApi, kSubmitRound, kSync };
 
 struct Options {
     int32_t device_id = 0;
     std::vector<Direction> directions = {Direction::kHostToDevice};
+    std::vector<size_t> sizes;
     MethodMode method_mode = MethodMode::kBoth;
-    size_t io_bytes = kDefaultShardBytes;
-    size_t warmup = 0U;
+    size_t warmup = kDefaultWarmup;
     size_t rounds = kDefaultRounds;
     int32_t timeout_ms = kDefaultTimeoutMs;
-    std::string csv_path = "shard_io_trace.csv";
+    std::string summary_path = "shard_io_summary.csv";
+    std::string trace_path = "shard_io_trace.csv";
 };
 
-enum class Phase { kSubmit, kSync };
+struct Span {
+    Clock::time_point start;
+    Clock::time_point end;
+};
+
+struct Measurement {
+    std::vector<double> submit_api_us;
+    double submit_round_us = 0.0;
+    double sync_us = 0.0;
+};
+
+struct MethodSamples {
+    std::vector<double> submit_api_us;
+    std::vector<double> submit_round_us;
+    std::vector<double> sync_us;
+};
 
 struct TraceRow {
-    size_t iteration = 0U;
+    size_t size_bytes = 0U;
+    size_t round = 0U;
     Direction direction = Direction::kHostToDevice;
     Method method = Method::kLoop;
-    Phase phase = Phase::kSubmit;
-    int64_t shard_index = -1;
-    size_t shard_count = kShardCount;
-    size_t io_bytes = kDefaultShardBytes;
+    Phase phase = Phase::kSubmitApi;
+    int64_t io_index = -1;
+    size_t io_count = kIoCount;
     uint64_t start_ns = 0U;
     uint64_t end_ns = 0U;
 };
+
+struct SummaryRow {
+    size_t size_bytes = 0U;
+    Direction direction = Direction::kHostToDevice;
+    Method method = Method::kLoop;
+    Phase phase = Phase::kSubmitApi;
+    size_t samples = 0U;
+    double p50_us = 0.0;
+    double p95_us = 0.0;
+};
+
+std::vector<size_t> DefaultSizes()
+{
+    std::vector<size_t> sizes;
+    for (size_t bytes = kFirstIoBytes; bytes <= kLastIoBytes; bytes += kIoStepBytes) {
+        sizes.push_back(bytes);
+    }
+    return sizes;
+}
 
 std::string RecentAclError()
 {
@@ -72,12 +113,12 @@ void CheckAcl(const std::string& operation, aclError error)
     if (error != ACL_SUCCESS) { ThrowAclError(operation, error); }
 }
 
-size_t CheckedTotalBytes(size_t io_bytes)
+size_t CheckedMultiply(size_t left, size_t right)
 {
-    if (io_bytes != 0U && kShardCount > std::numeric_limits<size_t>::max() / io_bytes) {
-        throw std::overflow_error("--io-size * shard count overflows size_t");
+    if (left != 0U && right > std::numeric_limits<size_t>::max() / left) {
+        throw std::overflow_error("IO size * IO count overflows size_t");
     }
-    return io_bytes * kShardCount;
+    return left * right;
 }
 
 class RuntimeSession {
@@ -201,14 +242,14 @@ private:
     size_t bytes_ = 0U;
 };
 
-class ShardBuffers {
+class IoBuffers {
 public:
-    ShardBuffers(Direction direction, int32_t device_id, size_t io_bytes)
+    IoBuffers(Direction direction, int32_t device_id, size_t io_bytes)
         : direction_(direction), device_id_(device_id), io_bytes_(io_bytes),
-          total_bytes_(CheckedTotalBytes(io_bytes_)), host_(total_bytes_), device_(total_bytes_),
-          expected_(total_bytes_), destinations_(kShardCount),
-          destination_max_sizes_(kShardCount, io_bytes_), sources_(kShardCount),
-          copy_sizes_(kShardCount, io_bytes_)
+          total_bytes_(CheckedMultiply(io_bytes_, kIoCount)), host_(total_bytes_),
+          device_(total_bytes_), expected_(total_bytes_), destinations_(kIoCount),
+          destination_max_sizes_(kIoCount, io_bytes_), sources_(kIoCount),
+          copy_sizes_(kIoCount, io_bytes_)
     {
         FillSource();
         BuildPointers();
@@ -245,7 +286,7 @@ public:
             actual = static_cast<const uint8_t*>(host_.get());
         }
         if (std::memcmp(actual, expected_.data(), total_bytes_) != 0) {
-            throw std::runtime_error("shard copy verification failed");
+            throw std::runtime_error("3-IO memcpy verification failed");
         }
     }
 
@@ -271,7 +312,7 @@ private:
     {
         auto* host = static_cast<uint8_t*>(host_.get());
         auto* device = static_cast<uint8_t*>(device_.get());
-        for (size_t index = 0U; index < kShardCount; ++index) {
+        for (size_t index = 0U; index < kIoCount; ++index) {
             const size_t offset = index * io_bytes_;
             if (direction_ == Direction::kHostToDevice) {
                 sources_[index] = host + offset;
@@ -323,7 +364,9 @@ std::string MethodName(Method method)
 
 std::string PhaseName(Phase phase)
 {
-    return phase == Phase::kSubmit ? "submit" : "sync";
+    if (phase == Phase::kSubmitApi) { return "submit_api"; }
+    if (phase == Phase::kSubmitRound) { return "submit_round"; }
+    return "sync";
 }
 
 std::vector<Method> SelectedMethods(MethodMode mode)
@@ -333,34 +376,46 @@ std::vector<Method> SelectedMethods(MethodMode mode)
     return {Method::kLoop, Method::kBatch};
 }
 
+size_t MethodIndex(const std::vector<Method>& methods, Method method)
+{
+    for (size_t index = 0U; index < methods.size(); ++index) {
+        if (methods[index] == method) { return index; }
+    }
+    return methods.size();
+}
+
 uint64_t SinceNanoseconds(Clock::time_point origin, Clock::time_point point)
 {
     return static_cast<uint64_t>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(point - origin).count());
 }
 
-void SubmitLoop(ShardBuffers& buffers, aclrtStream stream)
+double DurationMicroseconds(const Span& span)
+{
+    return std::chrono::duration<double, std::micro>(span.end - span.start).count();
+}
+
+void SubmitLoop(IoBuffers& buffers, aclrtStream stream)
 {
     const aclrtMemcpyKind kind = buffers.direction() == Direction::kHostToDevice
                                      ? ACL_MEMCPY_HOST_TO_DEVICE
                                      : ACL_MEMCPY_DEVICE_TO_HOST;
-    for (size_t index = 0U; index < kShardCount; ++index) {
+    for (size_t index = 0U; index < kIoCount; ++index) {
         const aclError error = aclrtMemcpyAsync(
             buffers.destinations()[index], buffers.io_bytes(), buffers.sources()[index],
-            buffers.io_bytes(),
-            kind, stream);
+            buffers.io_bytes(), kind, stream);
         if (error != ACL_SUCCESS) {
             ThrowAclError("aclrtMemcpyAsync[" + std::to_string(index) + "]", error);
         }
     }
 }
 
-void SubmitBatch(ShardBuffers& buffers, aclrtStream stream)
+void SubmitBatch(IoBuffers& buffers, aclrtStream stream)
 {
     size_t fail_index = std::numeric_limits<size_t>::max();
     const aclError error = aclrtMemcpyBatchAsync(
         buffers.destinations(), buffers.destination_max_sizes(), buffers.sources(),
-        buffers.copy_sizes(), kShardCount, buffers.attribute(), buffers.attribute_index(), 1U,
+        buffers.copy_sizes(), kIoCount, buffers.attribute(), buffers.attribute_index(), 1U,
         &fail_index, stream);
     if (error != ACL_SUCCESS) {
         std::ostringstream operation;
@@ -372,7 +427,7 @@ void SubmitBatch(ShardBuffers& buffers, aclrtStream stream)
     }
 }
 
-void Submit(Method method, ShardBuffers& buffers, aclrtStream stream)
+void Submit(Method method, IoBuffers& buffers, aclrtStream stream)
 {
     if (method == Method::kLoop) {
         SubmitLoop(buffers, stream);
@@ -387,7 +442,7 @@ void Synchronize(aclrtStream stream, int32_t timeout_ms)
              aclrtSynchronizeStreamWithTimeout(stream, timeout_ms));
 }
 
-void Validate(Method method, ShardBuffers& buffers, aclrtStream stream, int32_t timeout_ms)
+void Validate(Method method, IoBuffers& buffers, aclrtStream stream, int32_t timeout_ms)
 {
     buffers.ResetDestination();
     Submit(method, buffers, stream);
@@ -395,35 +450,55 @@ void Validate(Method method, ShardBuffers& buffers, aclrtStream stream, int32_t 
     buffers.Verify();
 }
 
-void RunMeasured(Method method, size_t iteration, ShardBuffers& buffers, aclrtStream stream,
-                 const Clock::time_point origin, int32_t timeout_ms, std::vector<TraceRow>* trace)
+void RunUnrecorded(Method method, IoBuffers& buffers, aclrtStream stream, int32_t timeout_ms)
 {
     buffers.ResetDestination();
+    Submit(method, buffers, stream);
+    Synchronize(stream, timeout_ms);
+}
+
+void AppendTrace(std::vector<TraceRow>* trace, size_t size_bytes, size_t round,
+                 Direction direction, Method method, Phase phase, int64_t io_index,
+                 Clock::time_point origin, const Span& span)
+{
+    trace->push_back({size_bytes, round, direction, method, phase, io_index, kIoCount,
+                      SinceNanoseconds(origin, span.start), SinceNanoseconds(origin, span.end)});
+}
+
+Measurement RunMeasured(Method method, size_t size_bytes, size_t round, IoBuffers& buffers,
+                        aclrtStream stream, Clock::time_point origin, int32_t timeout_ms,
+                        std::vector<TraceRow>* trace)
+{
+    buffers.ResetDestination();
+    Measurement measurement;
+    Span submit_round;
 
     if (method == Method::kLoop) {
         const aclrtMemcpyKind kind = buffers.direction() == Direction::kHostToDevice
                                          ? ACL_MEMCPY_HOST_TO_DEVICE
                                          : ACL_MEMCPY_DEVICE_TO_HOST;
-        for (size_t index = 0U; index < kShardCount; ++index) {
+        for (size_t index = 0U; index < kIoCount; ++index) {
             const auto start = Clock::now();
             const aclError error = aclrtMemcpyAsync(
                 buffers.destinations()[index], buffers.io_bytes(), buffers.sources()[index],
-                buffers.io_bytes(),
-                kind, stream);
+                buffers.io_bytes(), kind, stream);
             const auto end = Clock::now();
             if (error != ACL_SUCCESS) {
                 ThrowAclError("aclrtMemcpyAsync[" + std::to_string(index) + "]", error);
             }
-            trace->push_back({iteration, buffers.direction(), method, Phase::kSubmit,
-                              static_cast<int64_t>(index), 1U, buffers.io_bytes(),
-                              SinceNanoseconds(origin, start), SinceNanoseconds(origin, end)});
+            const Span span{start, end};
+            if (index == 0U) { submit_round.start = start; }
+            if (index + 1U == kIoCount) { submit_round.end = end; }
+            measurement.submit_api_us.push_back(DurationMicroseconds(span));
+            AppendTrace(trace, size_bytes, round, buffers.direction(), method, Phase::kSubmitApi,
+                        static_cast<int64_t>(index), origin, span);
         }
     } else {
         size_t fail_index = std::numeric_limits<size_t>::max();
         const auto start = Clock::now();
         const aclError error = aclrtMemcpyBatchAsync(
             buffers.destinations(), buffers.destination_max_sizes(), buffers.sources(),
-            buffers.copy_sizes(), kShardCount, buffers.attribute(), buffers.attribute_index(), 1U,
+            buffers.copy_sizes(), kIoCount, buffers.attribute(), buffers.attribute_index(), 1U,
             &fail_index, stream);
         const auto end = Clock::now();
         if (error != ACL_SUCCESS) {
@@ -434,30 +509,67 @@ void RunMeasured(Method method, size_t iteration, ShardBuffers& buffers, aclrtSt
             }
             ThrowAclError(operation.str(), error);
         }
-        trace->push_back({iteration, buffers.direction(), method, Phase::kSubmit, -1, kShardCount,
-                          buffers.io_bytes(), SinceNanoseconds(origin, start),
-                          SinceNanoseconds(origin, end)});
+        const Span span{start, end};
+        submit_round = span;
+        measurement.submit_api_us.push_back(DurationMicroseconds(span));
+        AppendTrace(trace, size_bytes, round, buffers.direction(), method, Phase::kSubmitApi, -1,
+                    origin, span);
     }
+
+    measurement.submit_round_us = DurationMicroseconds(submit_round);
+    AppendTrace(trace, size_bytes, round, buffers.direction(), method, Phase::kSubmitRound, -1,
+                origin, submit_round);
 
     const auto sync_start = Clock::now();
     Synchronize(stream, timeout_ms);
-    const auto sync_end = Clock::now();
-    trace->push_back({iteration, buffers.direction(), method, Phase::kSync, -1, kShardCount,
-                      buffers.io_bytes(), SinceNanoseconds(origin, sync_start),
-                      SinceNanoseconds(origin, sync_end)});
+    const Span completed_sync{sync_start, Clock::now()};
+    measurement.sync_us = DurationMicroseconds(completed_sync);
+    AppendTrace(trace, size_bytes, round, buffers.direction(), method, Phase::kSync, -1, origin,
+                completed_sync);
+    return measurement;
 }
 
-uint64_t ParseUnsigned(const std::string& text, const std::string& option)
+double Percentile(std::vector<double> samples, double percentile)
+{
+    if (samples.empty()) { throw std::invalid_argument("cannot summarize empty samples"); }
+    std::sort(samples.begin(), samples.end());
+    const double position = percentile * static_cast<double>(samples.size() - 1U);
+    const size_t lower = static_cast<size_t>(position);
+    const size_t upper = lower + (lower + 1U < samples.size() ? 1U : 0U);
+    const double fraction = position - static_cast<double>(lower);
+    return samples[lower] + (samples[upper] - samples[lower]) * fraction;
+}
+
+SummaryRow MakeSummary(size_t size_bytes, Direction direction, Method method, Phase phase,
+                       const std::vector<double>& samples)
+{
+    return {size_bytes, direction, method, phase, samples.size(), Percentile(samples, 0.50),
+            Percentile(samples, 0.95)};
+}
+
+void AddMethodSummaries(size_t size_bytes, Direction direction, Method method,
+                        const MethodSamples& samples, std::vector<SummaryRow>* output)
+{
+    output->push_back(MakeSummary(size_bytes, direction, method, Phase::kSubmitApi,
+                                  samples.submit_api_us));
+    output->push_back(MakeSummary(size_bytes, direction, method, Phase::kSubmitRound,
+                                  samples.submit_round_us));
+    output->push_back(
+        MakeSummary(size_bytes, direction, method, Phase::kSync, samples.sync_us));
+}
+
+size_t ParseUnsigned(const std::string& text, const std::string& option)
 {
     if (text.empty() || text[0] == '-') {
         throw std::invalid_argument(option + " requires a non-negative integer");
     }
     size_t parsed = 0U;
     const uint64_t value = std::stoull(text, &parsed, 10);
-    if (parsed != text.size()) {
-        throw std::invalid_argument("invalid value for " + option);
+    if (parsed != text.size()) { throw std::invalid_argument("invalid value for " + option); }
+    if (value > std::numeric_limits<size_t>::max()) {
+        throw std::invalid_argument(option + " does not fit in size_t");
     }
-    return value;
+    return static_cast<size_t>(value);
 }
 
 size_t ParseByteSize(std::string text)
@@ -469,21 +581,41 @@ size_t ParseByteSize(std::string text)
     if (!text.empty()) {
         const char unit = text.back();
         if (unit == 'K' || unit == 'k') {
-            multiplier = 1024U;
+            multiplier = kKiB;
             text.pop_back();
         } else if (unit == 'M' || unit == 'm') {
-            multiplier = 1024U * 1024U;
+            multiplier = kKiB * kKiB;
             text.pop_back();
         } else if (unit == 'G' || unit == 'g') {
-            multiplier = 1024U * 1024U * 1024U;
+            multiplier = kKiB * kKiB * kKiB;
             text.pop_back();
         }
     }
-    const uint64_t value = ParseUnsigned(text, "--io-size");
+    const uint64_t value = ParseUnsigned(text, "IO size");
     if (value == 0U || value > std::numeric_limits<size_t>::max() / multiplier) {
-        throw std::invalid_argument("--io-size must be positive and fit in size_t");
+        throw std::invalid_argument("IO size must be positive and fit in size_t");
     }
     return static_cast<size_t>(value * multiplier);
+}
+
+std::vector<std::string> SplitList(const std::string& text)
+{
+    std::vector<std::string> parts;
+    std::istringstream input(text);
+    std::string part;
+    while (std::getline(input, part, ',')) {
+        if (part.empty()) { throw std::invalid_argument("size list contains an empty item"); }
+        parts.push_back(part);
+    }
+    if (parts.empty()) { throw std::invalid_argument("size list must not be empty"); }
+    return parts;
+}
+
+std::vector<size_t> ParseSizeList(const std::string& text)
+{
+    std::vector<size_t> sizes;
+    for (const std::string& part : SplitList(text)) { sizes.push_back(ParseByteSize(part)); }
+    return sizes;
 }
 
 std::string TakeValue(int argc, char** argv, int* index, const std::string& argument)
@@ -515,33 +647,30 @@ void ParseDirection(const std::string& value, Options* options)
     }
 }
 
-void PrintUsage(const char* program)
-{
-    std::cout << "Usage: " << program << " [options]\n\n"
-              << "Default scenario: " << kDefaultShardBytes << " bytes x " << kShardCount
-              << " shards\n"
-              << "Options:\n"
-              << "  --device N            ACL device (default: 0)\n"
-              << "  --direction VALUE     h2d, d2h, or both (default: h2d)\n"
-              << "  --method VALUE        loop, batch, or both (default: both)\n"
-              << "  --io-size SIZE        bytes per shard, e.g. 176K, 1M (default: 176K)\n"
-              << "  --warmup N            unrecorded runs per method (default: 0)\n"
-              << "  --rounds N            recorded rounds per method (default: " << kDefaultRounds
-              << ")\n"
-              << "  --timeout-ms N        stream synchronization timeout (default: "
-              << kDefaultTimeoutMs << ")\n"
-              << "  --csv PATH            trace output (default: shard_io_trace.csv)\n"
-              << "  -h, --help            show this help\n";
-}
-
 Options ParseOptions(int argc, char** argv)
 {
     Options options;
+    options.sizes = DefaultSizes();
+    bool sizes_set = false;
     for (int index = 1; index < argc; ++index) {
         const std::string argument = argv[index];
         const std::string name = argument.substr(0U, argument.find('='));
         if (name == "-h" || name == "--help") {
-            PrintUsage(argv[0]);
+            std::cout << "Usage: " << argv[0] << " [options]\n\n"
+                      << "Scenario: 3 non-overlapping memcpy IOs per round\n"
+                      << "Options:\n"
+                      << "  --device N            ACL device (default: 0)\n"
+                      << "  --direction VALUE     h2d, d2h, or both (default: h2d)\n"
+                      << "  --method VALUE        loop, batch, or both (default: both)\n"
+                      << "  --sizes LIST          comma-separated sizes (default: 16K..256K by 16K)\n"
+                      << "  --io-size SIZE        single-size shortcut; conflicts with --sizes\n"
+                      << "  --warmup N            unrecorded rounds (default: " << kDefaultWarmup << ")\n"
+                      << "  --rounds N            measured rounds (default: " << kDefaultRounds << ")\n"
+                      << "  --timeout-ms N        stream sync timeout (default: " << kDefaultTimeoutMs
+                      << ")\n"
+                      << "  --csv PATH            summary CSV (default: shard_io_summary.csv)\n"
+                      << "  --trace PATH          raw trace CSV (default: shard_io_trace.csv)\n"
+                      << "  -h, --help            show this help\n";
             std::exit(0);
         } else if (name == "--device") {
             const uint64_t device = ParseUnsigned(TakeValue(argc, argv, &index, argument), name);
@@ -553,28 +682,32 @@ Options ParseOptions(int argc, char** argv)
             ParseDirection(TakeValue(argc, argv, &index, argument), &options);
         } else if (name == "--method") {
             options.method_mode = ParseMethodMode(TakeValue(argc, argv, &index, argument));
+        } else if (name == "--sizes") {
+            if (sizes_set) { throw std::invalid_argument("--sizes specified more than once"); }
+            options.sizes = ParseSizeList(TakeValue(argc, argv, &index, argument));
+            sizes_set = true;
         } else if (name == "--io-size") {
-            options.io_bytes = ParseByteSize(TakeValue(argc, argv, &index, argument));
+            if (sizes_set) { throw std::invalid_argument("--io-size conflicts with --sizes"); }
+            options.sizes = {ParseByteSize(TakeValue(argc, argv, &index, argument))};
+            sizes_set = true;
         } else if (name == "--warmup") {
-            options.warmup = static_cast<size_t>(
-                ParseUnsigned(TakeValue(argc, argv, &index, argument), name));
+            options.warmup = ParseUnsigned(TakeValue(argc, argv, &index, argument), name);
         } else if (name == "--rounds" || name == "--iterations") {
-            options.rounds = static_cast<size_t>(
-                ParseUnsigned(TakeValue(argc, argv, &index, argument), name));
-            if (options.rounds == 0U) {
-                throw std::invalid_argument(name + " must be positive");
-            }
+            options.rounds = ParseUnsigned(TakeValue(argc, argv, &index, argument), name);
+            if (options.rounds == 0U) { throw std::invalid_argument(name + " must be positive"); }
         } else if (name == "--timeout-ms") {
-            const uint64_t timeout =
-                ParseUnsigned(TakeValue(argc, argv, &index, argument), name);
+            const uint64_t timeout = ParseUnsigned(TakeValue(argc, argv, &index, argument), name);
             if (timeout == 0U ||
                 timeout > static_cast<uint64_t>(std::numeric_limits<int32_t>::max())) {
                 throw std::invalid_argument("--timeout-ms must be positive and fit in int32");
             }
             options.timeout_ms = static_cast<int32_t>(timeout);
         } else if (name == "--csv") {
-            options.csv_path = TakeValue(argc, argv, &index, argument);
-            if (options.csv_path.empty()) { throw std::invalid_argument("--csv must not be empty"); }
+            options.summary_path = TakeValue(argc, argv, &index, argument);
+            if (options.summary_path.empty()) { throw std::invalid_argument("--csv is empty"); }
+        } else if (name == "--trace") {
+            options.trace_path = TakeValue(argc, argv, &index, argument);
+            if (options.trace_path.empty()) { throw std::invalid_argument("--trace is empty"); }
         } else {
             throw std::invalid_argument("unknown option: " + argument);
         }
@@ -582,40 +715,56 @@ Options ParseOptions(int argc, char** argv)
     return options;
 }
 
-void WriteCsv(const std::string& path, const std::vector<TraceRow>& trace)
+void WriteTrace(const std::string& path, const std::vector<TraceRow>& trace)
 {
     std::ofstream output(path);
-    if (!output) { throw std::runtime_error("cannot open CSV for writing: " + path); }
-    output << "iteration,direction,method,phase,shard_index,shard_count,io_bytes,start_ns,end_ns,"
-              "duration_us\n";
+    if (!output) { throw std::runtime_error("cannot open trace CSV: " + path); }
+    output << "size_bytes,round,direction,method,phase,io_index,io_count,start_ns,end_ns,duration_us\n";
     output << std::fixed << std::setprecision(3);
     for (const TraceRow& row : trace) {
         const double duration_us = static_cast<double>(row.end_ns - row.start_ns) / 1000.0;
-        output << row.iteration << ',' << DirectionName(row.direction) << ','
-               << MethodName(row.method) << ',' << PhaseName(row.phase) << ',' << row.shard_index
-               << ',' << row.shard_count << ',' << row.io_bytes << ',' << row.start_ns << ','
-               << row.end_ns << ',' << duration_us << '\n';
+        output << row.size_bytes << ',' << row.round << ',' << DirectionName(row.direction) << ','
+               << MethodName(row.method) << ',' << PhaseName(row.phase) << ',' << row.io_index
+               << ',' << row.io_count << ',' << row.start_ns << ',' << row.end_ns << ','
+               << duration_us << '\n';
     }
+}
+
+void WriteSummary(const std::string& path, const std::vector<SummaryRow>& summary)
+{
+    std::ofstream output(path);
+    if (!output) { throw std::runtime_error("cannot open summary CSV: " + path); }
+    output << "size_bytes,direction,method,metric,samples,p50_us,p95_us\n";
+    output << std::fixed << std::setprecision(6);
+    for (const SummaryRow& row : summary) {
+        output << row.size_bytes << ',' << DirectionName(row.direction) << ','
+               << MethodName(row.method) << ',' << PhaseName(row.phase) << ',' << row.samples
+               << ',' << row.p50_us << ',' << row.p95_us << '\n';
+    }
+}
+
+std::vector<Method> RoundOrder(const std::vector<Method>& methods, size_t round)
+{
+    if (methods.size() == 2U && round % 2U != 0U) {
+        return {methods[1], methods[0]};
+    }
+    return methods;
 }
 
 void PrintConfiguration(const Options& options)
 {
-    std::cout << "scenario: shard_bytes=" << options.io_bytes << ", shard_count=" << kShardCount
-              << ", total_bytes=" << CheckedTotalBytes(options.io_bytes) << '\n'
-              << "direction=";
+    std::cout << "sizes=";
+    for (size_t index = 0U; index < options.sizes.size(); ++index) {
+        if (index != 0U) { std::cout << ','; }
+        std::cout << options.sizes[index];
+    }
+    std::cout << " bytes, io_count=" << kIoCount << ", direction=";
     for (size_t index = 0U; index < options.directions.size(); ++index) {
         if (index != 0U) { std::cout << ','; }
         std::cout << DirectionName(options.directions[index]);
     }
-    std::cout << ", method=";
-    if (options.method_mode == MethodMode::kBoth) {
-        std::cout << "loop,batch";
-    } else {
-        std::cout << (options.method_mode == MethodMode::kLoop ? "loop" : "batch");
-    }
     std::cout << ", warmup=" << options.warmup << ", rounds=" << options.rounds
-              << "\nTiming: Host monotonic clock; submit API interval and sync API interval only\n"
-              << "Trace: loop has one submit row per shard; batch has one row for one 460-shard API call\n";
+              << "\nTiming: submit_api, submit_round, and sync only; no end-to-end interval\n";
 }
 
 }  // namespace
@@ -629,35 +778,54 @@ int main(int argc, char** argv)
         RuntimeSession runtime(options.device_id);
         Stream stream;
         const std::vector<Method> methods = SelectedMethods(options.method_mode);
-        std::vector<TraceRow> trace;
-        const size_t rows_per_iteration =
-            methods.size() * (kShardCount + 1U);
-        trace.reserve(options.directions.size() * options.rounds * rows_per_iteration);
         const Clock::time_point origin = Clock::now();
+        std::vector<TraceRow> trace;
+        std::vector<SummaryRow> summary;
+        trace.reserve(options.sizes.size() * options.directions.size() * options.rounds *
+                      methods.size() * (kIoCount + 2U));
 
         for (Direction direction : options.directions) {
-            ShardBuffers buffers(direction, options.device_id, options.io_bytes);
-            for (Method method : methods) {
-                Validate(method, buffers, stream.get(), options.timeout_ms);
-            }
-            for (Method method : methods) {
-                for (size_t iteration = 0U; iteration < options.warmup; ++iteration) {
-                    buffers.ResetDestination();
-                    Submit(method, buffers, stream.get());
-                    Synchronize(stream.get(), options.timeout_ms);
-                }
-            }
-            for (size_t iteration = 0U; iteration < options.rounds; ++iteration) {
+            for (size_t size_bytes : options.sizes) {
+                IoBuffers buffers(direction, options.device_id, size_bytes);
+                std::vector<MethodSamples> samples(methods.size());
+
                 for (Method method : methods) {
-                    RunMeasured(method, iteration, buffers, stream.get(), origin,
-                                options.timeout_ms, &trace);
+                    Validate(method, buffers, stream.get(), options.timeout_ms);
+                }
+                for (size_t warmup = 0U; warmup < options.warmup; ++warmup) {
+                    for (Method method : RoundOrder(methods, warmup)) {
+                        RunUnrecorded(method, buffers, stream.get(), options.timeout_ms);
+                    }
+                }
+
+                for (size_t round = 0U; round < options.rounds; ++round) {
+                    for (Method method : RoundOrder(methods, round)) {
+                        const Measurement measurement =
+                            RunMeasured(method, size_bytes, round, buffers, stream.get(), origin,
+                                        options.timeout_ms, &trace);
+                        const size_t method_index = MethodIndex(methods, method);
+                        if (method_index >= samples.size()) { continue; }
+                        MethodSamples& method_samples = samples[method_index];
+                        method_samples.submit_api_us.insert(method_samples.submit_api_us.end(),
+                                                            measurement.submit_api_us.begin(),
+                                                            measurement.submit_api_us.end());
+                        method_samples.submit_round_us.push_back(measurement.submit_round_us);
+                        method_samples.sync_us.push_back(measurement.sync_us);
+                    }
+                }
+
+                for (size_t method_index = 0U; method_index < methods.size(); ++method_index) {
+                    AddMethodSummaries(size_bytes, direction, methods[method_index],
+                                       samples[method_index], &summary);
                 }
             }
         }
 
-        WriteCsv(options.csv_path, trace);
-        std::cout << "trace_rows=" << trace.size() << "\nCSV written to " << options.csv_path
-                  << '\n';
+        WriteSummary(options.summary_path, summary);
+        WriteTrace(options.trace_path, trace);
+        std::cout << "summary_rows=" << summary.size() << ", trace_rows=" << trace.size()
+                  << "\nSummary written to " << options.summary_path << "\nTrace written to "
+                  << options.trace_path << '\n';
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "ERROR: " << error.what() << '\n';

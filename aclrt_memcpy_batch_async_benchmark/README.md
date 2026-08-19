@@ -101,30 +101,35 @@ source /usr/local/Ascend/ascend-toolkit/latest/set_env.sh
 A5 UB Batch DMA 单算子和 ACL Graph/Software SQ 路径；`9.1.0-beta.2.pre`、
 `9.1.0-beta.3` 只有较早的单算子基础版本，不能只根据 test 的单算子结论外推 Graph 路径。
 
-## 固定 shard 场景 trace benchmark
+## 3-IO size sweep benchmark
 
-新增的 `aclrt_memcpy_shard_bench` 是独立入口，默认每个 shard `176 KiB`，每轮下发 `460` 个
-shard，总流量 `82,903,040` bytes；默认采集 10 轮。默认测试 H2D，并同时运行两种方案：
+`aclrt_memcpy_shard_bench` 是独立入口。默认扫描 `16K,32K,48K,...,256K`，每个 size case
+每轮固定下发 3 个相同大小、连续且互不重叠的 memcpy IO，默认 H2D、warmup 10 轮、测量 100 轮。
 
-- `loop`：对 460 个 shard 逐个调用 `aclrtMemcpyAsync`；每个 shard 产生一条 `submit` 记录；
-- `batch`：对 460 个 shard 调用一次 `aclrtMemcpyBatchAsync`；产生一条覆盖整个 batch API 调用的
-  `submit` 记录；
-- 每种方案在所有 shard 下发后产生一条 `sync` 记录，只覆盖 `aclrtSynchronizeStreamWithTimeout`；
+- `loop`：每轮连续调用 3 次 `aclrtMemcpyAsync`；原始 trace 分别记录 `io_index=0,1,2`；
+- `batch`：每轮一次调用 `aclrtMemcpyBatchAsync`，其中 `numBatches=3`，原始 trace 使用
+  `io_index=-1,io_count=3`；
+- `submit_api`：单次 API 调用区间；loop 汇总 3×rounds 个样本，batch 汇总 rounds 个样本；
+- `submit_round`：loop 从第一个 API 开始到第三个 API 结束的整轮提交区间，batch 等于 batch
+  API 区间；
+- `sync`：所有 IO 下发后，仅记录 `aclrtSynchronizeStreamWithTimeout` 前后的区间；
 - 不记录端到端区间，不插入 Event；所有时间戳都是 Host 单调时钟的相对纳秒值。
 
-batch API 本身只有一个 Host 下发调用，无法得到 460 个独立的 API 下发区间，因此 batch 的
-`submit` 行使用 `shard_index=-1, shard_count=460` 表示一次覆盖 460 个 shard 的调用。CSV 的
-原始 trace 保留每条记录的 `start_ns/end_ns/duration_us`，默认写入 `shard_io_trace.csv`。
+汇总 CSV 使用 `size_bytes,direction,method,metric,samples,p50_us,p95_us` 字段；原始 trace CSV
+保留每条区间的 `start_ns/end_ns/duration_us`，并额外记录 round、method 和 io_index。loop 与
+batch 每轮成对执行，并逐轮交替先后顺序。
 
 ```bash
 ./build_out/bin/aclrt_memcpy_shard_bench \
   --device 0 --method both --direction h2d \
-  --io-size 176K --warmup 0 --rounds 10 --csv shard_io_trace.csv
+  --sizes 16K,32K,48K,64K,80K,96K,112K,128K,144K,160K,176K,192K,208K,224K,240K,256K \
+  --warmup 10 --rounds 100 \
+  --csv shard_io_summary.csv --trace shard_io_trace.csv
 ```
 
-`--io-size` 可以改每个 shard 的 IO 大小，例如 `--io-size 4K`；`--rounds N` 控制有效采样轮数，
-每轮都会重新下发 460 个 shard，并在 CSV 的 `iteration` 列标识轮次。`--iterations N` 仍作为
-兼容别名保留。也可以用 `--direction d2h` 或 `--direction both`，以及 `--method loop`、
+可用 `--sizes 16K,32K,64K` 自定义多个 size，也可以用 `--io-size 64K` 只运行一个 size；两者
+同时指定会报错。`--rounds N` 控制 p50/p95 的 measured 样本数，`--iterations N` 仍作为兼容
+别名保留。也可以用 `--direction d2h` 或 `--direction both`，以及 `--method loop`、
 `--method batch` 单独采集一种方案。构建脚本会同时安装这个新入口：
 
 ```text
