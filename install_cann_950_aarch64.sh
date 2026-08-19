@@ -18,10 +18,11 @@ readonly TARGET_SOC="950"
 usage() {
   cat <<'EOF'
 Usage:
-  bash scripts/install_cann_950_aarch64.sh <install-path> [download-dir]
+  bash install_cann_950_aarch64.sh [install-path] [download-dir]
 
 Arguments:
-  install-path  Toolkit and ops installation root. Both packages use this path.
+  install-path  Optional Toolkit and ops installation root. Both packages use
+                this path. Defaults to /usr/local/Ascend.
   download-dir  Directory for downloaded run packages and installation logs.
                 Defaults to /var/tmp/hixl-cann-run-packages.
 
@@ -119,7 +120,12 @@ find_env_script() {
   find "$install_path" -maxdepth 5 -type f \( -name set_env.sh -o -name setenv.bash \) -print -quit 2>/dev/null || true
 }
 
-if [[ "$#" -lt 1 || "$#" -gt 2 ]]; then
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+if [[ "$#" -gt 2 ]]; then
   usage >&2
   exit 2
 fi
@@ -135,11 +141,10 @@ require_command tail
 require_command dirname
 require_command find
 
-install_path="$1"
+install_path="${1:-/usr/local/Ascend}"
 download_dir="${2:-${DOWNLOAD_DIR:-/var/tmp/hixl-cann-run-packages}}"
 mirror_root="${MIRROR_ROOT%/}"
 
-[[ -n "$install_path" ]] || die "install path must not be empty"
 mkdir -p "$download_dir"
 
 host_arch="$(uname -m)"
