@@ -79,17 +79,51 @@ download_package() {
   local partial_path="${package_path}.part"
 
   if is_downloaded_run_valid "$package_path"; then
-    log "reuse downloaded package: ${package_path}"
+    log "reuse downloaded package: ${package_path}" >&2
     return 0
   fi
 
-  log "download: ${package_url}"
+  log "download: ${package_url}" >&2
   curl --fail --location --show-error --retry 3 --retry-all-errors \
     --connect-timeout 20 --output "$partial_path" --progress-bar "$package_url"
   mv -f "$partial_path" "$package_path"
 
   is_downloaded_run_valid "$package_path" || die "downloaded file is not a valid run package: ${package_path}"
-  log "downloaded: ${package_path}"
+  log "downloaded: ${package_path}" >&2
+}
+
+find_existing_package() {
+  local package_name="$1"
+  local search_root
+  local candidate
+
+  for search_root in "$download_dir" "$install_path"; do
+    [[ -d "$search_root" ]] || continue
+    while IFS= read -r candidate; do
+      if is_downloaded_run_valid "$candidate"; then
+        printf '%s\n' "$candidate"
+        return 0
+      fi
+      log "WARNING: ignoring invalid existing package: ${candidate}" >&2
+    done < <(find "$search_root" -type f -name "$package_name" -print 2>/dev/null)
+  done
+  return 1
+}
+
+resolve_package() {
+  local package_name="$1"
+  local package_url="$2"
+  local existing_path
+
+  existing_path="$(find_existing_package "$package_name" || true)"
+  if [[ -n "$existing_path" ]]; then
+    log "reuse existing package: ${existing_path}" >&2
+    printf '%s\n' "$existing_path"
+    return 0
+  fi
+
+  download_package "$package_name" "$package_url"
+  printf '%s\n' "${download_dir}/${package_name}"
 }
 
 path_is_writable() {
@@ -195,13 +229,13 @@ log "selected ops: ${ops_name}"
 log "installation root: ${install_path}"
 log "download directory: ${download_dir}"
 
-download_package "$toolkit_name" "${build_url}/${toolkit_name}"
-download_package "$ops_name" "${build_url}/${ops_name}"
+toolkit_package_path="$(resolve_package "$toolkit_name" "${build_url}/${toolkit_name}")"
+ops_package_path="$(resolve_package "$ops_name" "${build_url}/${ops_name}")"
 
 toolkit_log="${download_dir}/toolkit_install.log"
 ops_log="${download_dir}/ops_install.log"
-run_installer "${download_dir}/${toolkit_name}" "$toolkit_log"
-run_installer "${download_dir}/${ops_name}" "$ops_log"
+run_installer "$toolkit_package_path" "$toolkit_log"
+run_installer "$ops_package_path" "$ops_log"
 
 env_script="$(find_env_script)"
 log "CANN Toolkit and ${TARGET_SOC} ops installation completed"
