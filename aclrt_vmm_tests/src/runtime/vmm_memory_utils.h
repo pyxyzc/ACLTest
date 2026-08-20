@@ -47,6 +47,7 @@ PhysicalMemoryConfig MakeHostConfig(const Options& options);
 bool QueryAlignedSize(const PhysicalMemoryConfig& config, size_t requested, size_t* aligned);
 
 std::vector<uint8_t> MakePattern(size_t size, uint32_t seed);
+uint8_t PatternByte(uint32_t seed, size_t offset);
 
 struct PhysicalMapping {
     PhysicalMapping() = default;
@@ -61,13 +62,17 @@ struct PhysicalMapping {
     bool reserved = false;
     bool owns_handle = false;
 
+    bool ReserveAndMap(aclrtDrvMemHandle input_handle, size_t map_size,
+                       aclError* failure_ret = nullptr);
+    bool SetAccess(const aclrtMemLocation& access_location, aclError* failure_ret = nullptr);
     bool ReserveMapAndSetAccess(aclrtDrvMemHandle input_handle, size_t map_size,
-                                const aclrtMemLocation& access_location);
+                                const aclrtMemLocation& access_location,
+                                aclError* failure_ret = nullptr);
     void Cleanup();
 };
 
 bool AllocateAndMapPhysical(const PhysicalMemoryConfig& config, size_t aligned_size,
-                            PhysicalMapping* mapping);
+                            PhysicalMapping* mapping, aclError* failure_ret = nullptr);
 bool CopyHostToMapping(void* dst, size_t dst_max, const std::vector<uint8_t>& src,
                        const PhysicalMemoryConfig& config, const std::string& label);
 bool CopyMappingToHost(std::vector<uint8_t>* dst, const void* src, size_t src_size,

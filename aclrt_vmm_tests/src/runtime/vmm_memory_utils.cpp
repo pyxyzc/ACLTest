@@ -171,33 +171,56 @@ bool QueryAlignedSize(const PhysicalMemoryConfig& config, size_t requested, size
 std::vector<uint8_t> MakePattern(size_t size, uint32_t seed)
 {
     std::vector<uint8_t> data(size);
-    for (size_t i = 0; i < size; ++i) {
-        data[i] = static_cast<uint8_t>((seed + (i * 131U) + (i >> 3U)) & 0xffU);
-    }
+    for (size_t i = 0; i < size; ++i) { data[i] = PatternByte(seed, i); }
     return data;
 }
 
-bool PhysicalMapping::ReserveMapAndSetAccess(aclrtDrvMemHandle input_handle, size_t map_size,
-                                             const aclrtMemLocation& access_location)
+uint8_t PatternByte(uint32_t seed, size_t offset)
+{
+    return static_cast<uint8_t>((seed + (offset * 131U) + (offset >> 3U)) & 0xffU);
+}
+
+bool PhysicalMapping::ReserveAndMap(aclrtDrvMemHandle input_handle, size_t map_size,
+                                    aclError* failure_ret)
 {
     handle = input_handle;
     size = map_size;
 
     aclError ret = aclrtReserveMemAddress(&virt, size, 0, nullptr, 0);
+    if (failure_ret != nullptr) { *failure_ret = ret; }
     if (!LogAcl("aclrtReserveMemAddress", ret)) { return false; }
     reserved = true;
     std::cout << "  reserved virt=" << virt << "\n";
 
     ret = aclrtMapMem(virt, size, 0, handle, 0);
+    if (failure_ret != nullptr) { *failure_ret = ret; }
     if (!LogAcl("aclrtMapMem", ret)) { return false; }
     mapped = true;
+    return true;
+}
 
+bool PhysicalMapping::SetAccess(const aclrtMemLocation& access_location, aclError* failure_ret)
+{
     aclrtMemAccessDesc access = {};
     access.location = access_location;
     access.flags = kAclMemAccessReadWrite;
-    ret = aclrtMemSetAccess(virt, size, &access, 1);
+    const char* location_name = access_location.type == ACL_MEM_LOCATION_TYPE_HOST     ? "HOST"
+                                : access_location.type == ACL_MEM_LOCATION_TYPE_DEVICE ? "DEVICE"
+                                                                                       : "OTHER";
+    std::cout << "  access location=" << location_name << "(" << access_location.type
+              << "), id=" << access_location.id << "\n";
+    const aclError ret = aclrtMemSetAccess(virt, size, &access, 1);
+    if (failure_ret != nullptr) { *failure_ret = ret; }
     if (!LogAcl("aclrtMemSetAccess(READWRITE)", ret)) { return false; }
     return true;
+}
+
+bool PhysicalMapping::ReserveMapAndSetAccess(aclrtDrvMemHandle input_handle, size_t map_size,
+                                             const aclrtMemLocation& access_location,
+                                             aclError* failure_ret)
+{
+    return ReserveAndMap(input_handle, map_size, failure_ret) &&
+           SetAccess(access_location, failure_ret);
 }
 
 void PhysicalMapping::Cleanup()
@@ -220,13 +243,15 @@ void PhysicalMapping::Cleanup()
 PhysicalMapping::~PhysicalMapping() { Cleanup(); }
 
 bool AllocateAndMapPhysical(const PhysicalMemoryConfig& config, size_t aligned_size,
-                            PhysicalMapping* mapping)
+                            PhysicalMapping* mapping, aclError* failure_ret)
 {
     aclrtDrvMemHandle handle = nullptr;
     aclError ret = aclrtMallocPhysical(&handle, aligned_size, &config.prop, 0);
+    if (failure_ret != nullptr) { *failure_ret = ret; }
     if (!LogAcl("aclrtMallocPhysical", ret)) { return false; }
     mapping->owns_handle = true;
-    return mapping->ReserveMapAndSetAccess(handle, aligned_size, config.access_location);
+    return mapping->ReserveMapAndSetAccess(handle, aligned_size, config.access_location,
+                                           failure_ret);
 }
 
 bool CopyHostToMapping(void* dst, size_t dst_max, const std::vector<uint8_t>& src,

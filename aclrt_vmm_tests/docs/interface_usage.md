@@ -183,16 +183,18 @@ aclrtFreePhysical
 
 ## 测试覆盖关系
 
-本目录拆成三个单项测试，并提供 `aclrt_vmm_tests` suite 入口。每个
-测试都保留 host/vector 指针与 VMM VA 之间的校验，并追加独立 physical memory 之间的
-VMM VA-to-VA 校验。IPC 测试使用独立的 `aclrt_vmm_ipc_child` helper；父进程只在
-helper exec 前执行进程创建，不在 fork 子进程中调用 AscendCL：
+本目录提供四个单项测试和 `aclrt_vmm_tests` suite 入口。memcpy 测试保留
+host/vector 指针与 VMM VA 之间的校验，并追加独立 physical memory 之间的 VMM
+VA-to-VA 校验。Host pointer 测试只通过裸 VA 指针读写数据，不调用 `aclrtMemcpy`。
+IPC 测试使用独立的 `aclrt_vmm_ipc_child` helper；父进程只在 helper exec 前执行进程
+创建，不在 fork 子进程中调用 AscendCL：
 
 | Test | 覆盖接口 |
 | --- | --- |
 | `aclrt_vmm_single_process_test` | 单映射 H2D/D2H 校验；两块独立 device physical memory 的 VA-to-VA D2D 校验；host physical VA 与 device physical VA 的 H2D/D2H 互传校验 |
 | `aclrt_vmm_device_ipc_test` parent/helper | 单 handle IPC 双向校验；两 handle IPC 中 parent 执行一次 VA-to-VA D2D，并由 helper import/map src/dst 两个 handle；验证 parent VA-to-VA 结果并执行 helper 侧 VA-to-VA D2D |
-| `aclrt_vmm_host_ipc_test` | Host NUMA physical memory 的单 handle IPC 双向校验；child import/map 成功后追加 imported host VA 与 `aclrtMalloc` device ptr 的 H2D/D2H 探测；两 handle IPC 中 parent/child 各执行一次 VA-to-VA H2H |
+| `aclrt_vmm_host_memcpy` | Host NUMA physical memory 的 memcpy 能力；包含 imported host VA 与 host/device buffer 的双向拷贝，以及两 handle VA-to-VA H2H |
+| `aclrt_vmm_host_pointer` | 复用相同 VMM setup，但能力阶段只用 `volatile uint8_t*` 直接读写 imported host VA；双方 set access 成功后才开始访问 |
 | cleanup | `aclrtUnmapMem`、`aclrtReleaseMemAddress`、`aclrtFreePhysical` |
 
 运行命令：
@@ -201,7 +203,8 @@ helper exec 前执行进程创建，不在 fork 子进程中调用 AscendCL：
 bash build.sh
 ./build_out/bin/aclrt_vmm_single_process_test --device 0 --size 4096
 ./build_out/bin/aclrt_vmm_device_ipc_test --device 0 --size 4096
-./build_out/bin/aclrt_vmm_host_ipc_test --device 0 --host-numa 0 --size 4096
+./build_out/bin/aclrt_vmm_host_memcpy --device 0 --host-numa 0 --size 4096
+./build_out/bin/aclrt_vmm_host_pointer --device 0 --host-numa 0 --size 4096
 ./build_out/bin/aclrt_vmm_tests --device 0 --host-numa 0 --size 4096
 bash clear.sh
 ```

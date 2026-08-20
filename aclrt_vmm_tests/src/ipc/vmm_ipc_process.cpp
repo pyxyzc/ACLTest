@@ -49,16 +49,19 @@ int RunIpcChild(int read_fd, int write_fd)
 
     aclError set_device_ret = ACL_ERROR_RT_PARAM_INVALID;
     if (!runtime.SetDevice(share_msg.device, &set_device_ret)) {
-        SendChildResult(write_fd, false, set_device_ret, "child set device failed");
+        SendSetupReady(write_fd, false, set_device_ret, "child set device failed");
         return 1;
     }
 
-    if (share_msg.test_kind == static_cast<uint32_t>(IpcTestKind::CopyDirection)) {
-        return RunIpcCopyDirectionChild(write_fd, share_msg);
+    if (share_msg.test_kind == static_cast<uint32_t>(IpcTestKind::MemcpyDirection)) {
+        return RunIpcMemcpyDirectionChild(read_fd, write_fd, share_msg);
+    }
+    if (share_msg.test_kind == static_cast<uint32_t>(IpcTestKind::HostPointer)) {
+        return RunIpcHostPointerChild(read_fd, write_fd, share_msg);
     }
 
-    SendChildResult(write_fd, false, ACL_ERROR_RT_PARAM_INVALID,
-                    "child received unsupported IPC test kind");
+    SendSetupReady(write_fd, false, ACL_ERROR_RT_PARAM_INVALID,
+                   "child received unsupported IPC test kind");
     return 1;
 }
 

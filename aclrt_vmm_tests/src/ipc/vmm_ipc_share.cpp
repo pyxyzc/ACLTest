@@ -238,9 +238,8 @@ bool ImportAndMapSharedHandle(const ShareMsg& share_msg, size_t index,
 
     mapping->owns_handle = true;
     if (!mapping->ReserveMapAndSetAccess(imported, static_cast<size_t>(map_size),
-                                         config.access_location)) {
+                                         config.access_location, failure_ret)) {
         mapping->Cleanup();
-        if (failure_ret != nullptr) { *failure_ret = ACL_ERROR_RT_PARAM_INVALID; }
         return false;
     }
     return true;

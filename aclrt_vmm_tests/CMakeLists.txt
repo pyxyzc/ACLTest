@@ -110,6 +110,7 @@ add_library(aclrt_vmm_common STATIC
     src/app/vmm_test_common.cpp
     src/runtime/vmm_memory_utils.cpp
     src/runtime/vmm_memory_copy.cpp
+    src/runtime/vmm_pointer_access.cpp
     src/app/vmm_single_process.cpp
     src/ipc/vmm_ipc.cpp
     src/ipc/vmm_ipc_transport.cpp
@@ -118,6 +119,8 @@ add_library(aclrt_vmm_common STATIC
     src/ipc/vmm_ipc_endpoint.cpp
     src/ipc/vmm_ipc_parent.cpp
     src/ipc/vmm_ipc_child_ops.cpp
+    src/ipc/vmm_ipc_child_setup.cpp
+    src/ipc/vmm_ipc_pointer.cpp
     src/ipc/vmm_ipc_cases.cpp
 )
 
@@ -168,8 +171,10 @@ add_vmm_test(aclrt_vmm_single_process_test
     src/app/vmm_single_process_test.cpp)
 add_vmm_test(aclrt_vmm_device_ipc_test
     src/app/vmm_device_ipc_test.cpp)
-add_vmm_test(aclrt_vmm_host_ipc_test
-    src/app/vmm_host_ipc_test.cpp)
+add_vmm_test(aclrt_vmm_host_memcpy
+    src/app/vmm_host_memcpy.cpp)
+add_vmm_test(aclrt_vmm_host_pointer
+    src/app/vmm_host_pointer.cpp)
 add_vmm_test(aclrt_vmm_tests
     src/app/vmm_tests.cpp)
 

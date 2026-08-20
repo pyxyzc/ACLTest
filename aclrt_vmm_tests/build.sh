@@ -72,7 +72,8 @@ executables=(
   aclrt_vmm_tests
   aclrt_vmm_single_process_test
   aclrt_vmm_device_ipc_test
-  aclrt_vmm_host_ipc_test
+  aclrt_vmm_host_memcpy
+  aclrt_vmm_host_pointer
   aclrt_vmm_ipc_child
 )
 for executable in "${executables[@]}"; do

@@ -8,9 +8,14 @@ bool RunVmmDeviceIpcTest(const Options& options)
     return internal::RunVmmDeviceIpcEndpointTests(options);
 }
 
-bool RunVmmHostIpcTest(const Options& options)
+bool RunVmmHostMemcpyTest(const Options& options)
 {
-    return internal::RunVmmHostIpcEndpointTests(options);
+    return internal::RunVmmHostMemcpyEndpointTests(options);
+}
+
+bool RunVmmHostPointerTest(const Options& options)
+{
+    return internal::RunVmmHostPointerEndpointTest(options);
 }
 
 bool RunVmmDeviceHostIpcTest(const Options& options)

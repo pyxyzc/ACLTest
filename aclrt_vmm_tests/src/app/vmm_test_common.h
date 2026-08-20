@@ -39,7 +39,8 @@ int RunTestProgram(int argc, char** argv, const char* title, const TestCase* tes
 
 bool RunSingleProcessVmmTest(const Options& options);
 bool RunVmmDeviceIpcTest(const Options& options);
-bool RunVmmHostIpcTest(const Options& options);
+bool RunVmmHostMemcpyTest(const Options& options);
+bool RunVmmHostPointerTest(const Options& options);
 bool RunVmmDeviceHostIpcTest(const Options& options);
 
 }  // namespace acltest

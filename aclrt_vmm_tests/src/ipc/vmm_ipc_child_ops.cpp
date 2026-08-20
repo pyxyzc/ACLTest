@@ -2,20 +2,16 @@
 #include <iostream>
 #include <vector>
 #include "console_utils.h"
+#include "vmm_ipc_child_setup.h"
 #include "vmm_ipc_endpoint.h"
 
 namespace acltest::internal {
 
-int RunIpcCopyDirectionChild(int write_fd, const ShareMsg& share_msg)
+int RunIpcMemcpyDirectionChild(int read_fd, int write_fd, const ShareMsg& share_msg)
 {
-    if (share_msg.test_kind != static_cast<uint32_t>(IpcTestKind::CopyDirection)) {
+    if (share_msg.test_kind != static_cast<uint32_t>(IpcTestKind::MemcpyDirection)) {
         SendChildResult(write_fd, false, ACL_ERROR_RT_PARAM_INVALID,
-                        "child expected copy-direction test");
-        return 1;
-    }
-    if (share_msg.handle_count > kMaxSharedHandleCount) {
-        SendChildResult(write_fd, false, ACL_ERROR_RT_PARAM_INVALID,
-                        "child received too many shared handles");
+                        "child expected memcpy-direction test", IpcResultPhase::VmmSetup);
         return 1;
     }
 
@@ -24,22 +20,8 @@ int RunIpcCopyDirectionChild(int write_fd, const ShareMsg& share_msg)
     const std::string direction = DirectionName(source_kind, destination_kind);
 
     std::array<PhysicalMapping, kMaxSharedHandleCount> mappings;
-    bool ok = true;
     aclError failure_ret = ACL_ERROR_RT_PARAM_INVALID;
-    for (uint32_t i = 0; i < share_msg.handle_count && ok; ++i) {
-        const auto memory_kind = MemoryKindFromWire(share_msg.handle_memory_kinds[i]);
-        const auto config = MakeConfigForKind(share_msg, memory_kind);
-        ok = ImportAndMapSharedHandle(share_msg, i, config, &mappings[i], &failure_ret);
-    }
-
-    DeviceBuffer device_buffer;
-    if (ok && EndpointUsesDeviceBuffer(source_kind, destination_kind)) {
-        ok = device_buffer.Allocate(static_cast<size_t>(share_msg.test_size));
-    }
-
-    const size_t test_size = static_cast<size_t>(share_msg.test_size);
-    std::vector<uint8_t> expected = MakePattern(test_size, share_msg.parent_seed);
-    std::vector<uint8_t> actual(test_size, 0);
+    bool ok = PrepareChildMappings(share_msg, &mappings, &failure_ret);
 
     const uint32_t source_handle_index = HandleIndexForEndpoint(share_msg, source_kind, true);
     const uint32_t destination_handle_index =
@@ -56,6 +38,25 @@ int RunIpcCopyDirectionChild(int write_fd, const ShareMsg& share_msg)
         failure_ret = ACL_ERROR_RT_PARAM_INVALID;
         ok = false;
     }
+
+    if (!ok) {
+        SendSetupReady(write_fd, false, failure_ret, "child VMM setup failed");
+        CleanupChildMappings(&mappings, share_msg.handle_count);
+        return 1;
+    }
+    if (!SignalSetupReadyAndWaitForStart(read_fd, write_fd)) {
+        CleanupChildMappings(&mappings, share_msg.handle_count);
+        return 1;
+    }
+
+    DeviceBuffer device_buffer;
+    if (EndpointUsesDeviceBuffer(source_kind, destination_kind)) {
+        ok = device_buffer.Allocate(static_cast<size_t>(share_msg.test_size));
+    }
+
+    const size_t test_size = static_cast<size_t>(share_msg.test_size);
+    std::vector<uint8_t> expected = MakePattern(test_size, share_msg.parent_seed);
+    std::vector<uint8_t> actual(test_size, 0);
 
     Endpoint source;
     Endpoint destination;
@@ -83,12 +84,12 @@ int RunIpcCopyDirectionChild(int write_fd, const ShareMsg& share_msg)
     if (!ok && !verify_in_child) { PrintRed("  " + direction + " ×"); }
 
     device_buffer.Cleanup();
-    for (uint32_t i = 0; i < share_msg.handle_count; ++i) { mappings[i].Cleanup(); }
+    CleanupChildMappings(&mappings, share_msg.handle_count);
 
     const aclError result_ret =
         ok ? ACL_SUCCESS : (failure_ret == ACL_SUCCESS ? ACL_ERROR_RT_PARAM_INVALID : failure_ret);
     SendChildResult(write_fd, ok, result_ret,
-                    ok ? "child copied direction" : "child copy direction failed");
+                    ok ? "child memcpy direction passed" : "child memcpy direction failed");
     return ok ? 0 : 1;
 }
 

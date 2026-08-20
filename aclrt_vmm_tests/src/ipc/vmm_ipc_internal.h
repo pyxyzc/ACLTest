@@ -11,6 +11,8 @@ namespace acltest::internal {
 constexpr uint32_t kPidMagic = 0x50494431U;
 constexpr uint32_t kShareMagic = 0x53485231U;
 constexpr uint32_t kStopMagic = 0x53544f50U;
+constexpr uint32_t kReadyMagic = 0x52445931U;
+constexpr uint32_t kStartMagic = 0x53545231U;
 constexpr uint32_t kResultMagic = 0x52534c54U;
 constexpr size_t kMaxSharedHandleBytes = 128;
 constexpr size_t kMaxSharedHandleCount = 2;
@@ -22,7 +24,13 @@ enum class ShareApi : uint32_t {
 };
 
 enum class IpcTestKind : uint32_t {
-    CopyDirection = 1,
+    MemcpyDirection = 1,
+    HostPointer = 2,
+};
+
+enum class IpcResultPhase : uint32_t {
+    VmmSetup = 1,
+    Capability = 2,
 };
 
 enum class IpcMemoryKind : uint32_t {
@@ -70,10 +78,23 @@ struct ShareMsg {
     SharedHandleBlob handles[kMaxSharedHandleCount] = {};
 };
 
+struct SetupReadyMsg {
+    uint32_t magic = kReadyMagic;
+    int32_t ok = 0;
+    int32_t ret = 0;
+    char message[192] = {};
+};
+
+struct StartMsg {
+    uint32_t magic = kStartMagic;
+};
+
 struct ChildResult {
     uint32_t magic = kResultMagic;
     int32_t ok = 0;
     int32_t ret = 0;
+    uint32_t phase = static_cast<uint32_t>(IpcResultPhase::Capability);
+    int32_t signal_number = 0;
     char message[192] = {};
 };
 
@@ -81,7 +102,11 @@ bool WriteFull(int fd, const void* data, size_t size);
 bool ReadFull(int fd, void* data, size_t size);
 void CloseFd(int* fd);
 
-void SendChildResult(int write_fd, bool ok, aclError ret, const std::string& message);
+void SendSetupReady(int write_fd, bool ok, aclError ret, const std::string& message);
+bool SendStartMessage(int fd, bool start);
+bool WaitForStartMessage(int fd);
+void SendChildResult(int write_fd, bool ok, aclError ret, const std::string& message,
+                     IpcResultPhase phase = IpcResultPhase::Capability, int signal_number = 0);
 void SendStopMessage(int fd);
 
 bool ExportShareableHandle(const Options& options, aclrtDrvMemHandle handle,
@@ -91,10 +116,12 @@ bool ImportAndMapSharedHandle(const ShareMsg& share_msg, size_t index,
                               aclError* failure_ret);
 
 int RunIpcChild(int read_fd, int write_fd);
-int RunIpcCopyDirectionChild(int write_fd, const ShareMsg& share_msg);
+int RunIpcMemcpyDirectionChild(int read_fd, int write_fd, const ShareMsg& share_msg);
+int RunIpcHostPointerChild(int read_fd, int write_fd, const ShareMsg& share_msg);
 
 bool RunVmmDeviceIpcEndpointTests(const Options& options);
-bool RunVmmHostIpcEndpointTests(const Options& options);
+bool RunVmmHostMemcpyEndpointTests(const Options& options);
+bool RunVmmHostPointerEndpointTest(const Options& options);
 bool RunVmmDeviceHostIpcEndpointTest(const Options& options);
 
 }  // namespace acltest::internal

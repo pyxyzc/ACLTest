@@ -7,9 +7,9 @@
 namespace acltest::internal {
 namespace {
 
-void FillResult(ChildResult* result, bool ok, aclError ret, const std::string& message)
+template <typename Message>
+void FillMessage(Message* result, bool ok, aclError ret, const std::string& message)
 {
-    result->magic = kResultMagic;
     result->ok = ok ? 1 : 0;
     result->ret = static_cast<int32_t>(ret);
     std::snprintf(result->message, sizeof(result->message), "%s", message.c_str());
@@ -56,10 +56,34 @@ void CloseFd(int* fd)
     }
 }
 
-void SendChildResult(int write_fd, bool ok, aclError ret, const std::string& message)
+void SendSetupReady(int write_fd, bool ok, aclError ret, const std::string& message)
+{
+    SetupReadyMsg ready;
+    FillMessage(&ready, ok, ret, message);
+    (void)WriteFull(write_fd, &ready, sizeof(ready));
+}
+
+bool SendStartMessage(int fd, bool start)
+{
+    StartMsg msg;
+    msg.magic = start ? kStartMagic : kStopMagic;
+    return WriteFull(fd, &msg, sizeof(msg));
+}
+
+bool WaitForStartMessage(int fd)
+{
+    StartMsg msg;
+    if (!ReadFull(fd, &msg, sizeof(msg))) { return false; }
+    return msg.magic == kStartMagic;
+}
+
+void SendChildResult(int write_fd, bool ok, aclError ret, const std::string& message,
+                     IpcResultPhase phase, int signal_number)
 {
     ChildResult result;
-    FillResult(&result, ok, ret, message);
+    FillMessage(&result, ok, ret, message);
+    result.phase = static_cast<uint32_t>(phase);
+    result.signal_number = signal_number;
     (void)WriteFull(write_fd, &result, sizeof(result));
 }
 

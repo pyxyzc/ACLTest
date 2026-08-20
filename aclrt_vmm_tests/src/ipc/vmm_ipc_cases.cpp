@@ -12,8 +12,8 @@ bool RunIpcEndpointPair(const Options& options, const char* section, IpcEndpoint
     std::cout << "\n";
     PrintRed(section);
 
-    bool ok = RunIpcCopyDirection(options, left, right, seed_base + 1U);
-    ok = RunIpcCopyDirection(options, right, left, seed_base + 2U) && ok;
+    bool ok = RunIpcMemcpyDirection(options, left, right, seed_base + 1U);
+    ok = RunIpcMemcpyDirection(options, right, left, seed_base + 2U) && ok;
     return ok;
 }
 
@@ -51,7 +51,7 @@ bool RunVmmDeviceIpcEndpointTests(const Options& options)
     return RunIpcCases(options, cases, sizeof(cases) / sizeof(cases[0]));
 }
 
-bool RunVmmHostIpcEndpointTests(const Options& options)
+bool RunVmmHostMemcpyEndpointTests(const Options& options)
 {
     constexpr IpcCase cases[] = {
         {"[multi-process] imported host VA <-> device buffer",    IpcEndpointKind::ImportedHostVa,
@@ -62,6 +62,13 @@ bool RunVmmHostIpcEndpointTests(const Options& options)
          IpcEndpointKind::ImportedHostVa, 0x2600U},
     };
     return RunIpcCases(options, cases, sizeof(cases) / sizeof(cases[0]));
+}
+
+bool RunVmmHostPointerEndpointTest(const Options& options)
+{
+    std::cout << "\n";
+    PrintRed("[multi-process] imported host VA pointer read/write");
+    return RunIpcHostPointer(options, 0x2801U, 0x2802U);
 }
 
 bool RunVmmDeviceHostIpcEndpointTest(const Options& options)

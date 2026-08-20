@@ -31,7 +31,7 @@
    pattern，再写入 reply pattern，父进程最后读回校验。随后追加两块独立 device
    physical memory 的跨进程 VA-to-VA 校验，parent 和 child 各执行一次 D2D VA-to-VA
    memcpy。
-3. Host physical memory 跨进程共享：
+3. Host physical memory 跨进程 memcpy 能力：
    父进程申请 `ACL_MEM_LOCATION_TYPE_HOST_NUMA + ACL_DDR_MEM_HUGE` 物理内存并导出
    shareable handle，子进程 import 后重新 reserve/map/set access。该测试使用
    2MiB 固定对齐申请大小，不再对 host physical prop 调用
@@ -42,6 +42,11 @@
    `ACL_MEMCPY_DEVICE_TO_HOST` 的能力。
    随后追加两块独立 host physical memory 的跨进程 VA-to-VA 校验，parent 和 child
    各执行一次 H2H VA-to-VA memcpy。任一步不支持或失败都会返回 FAIL。
+4. Host physical memory 跨进程 pointer 能力：
+   与 memcpy 测试复用相同的 export/import/reserve/map/set access 前置流程，但能力
+   阶段不调用 `aclrtMemcpy`，而是由 parent 和 child 分别通过 `volatile uint8_t*`
+   直接写入和读取 imported host VA。子进程先发送 setup ready，父进程确认双方
+   `aclrtMemSetAccess` 均成功后才开始 pointer 访问；前置流程失败时不会解引用 VA。
 
 ## 编译
 
@@ -70,10 +75,12 @@ bash clear.sh
 ```bash
 ./build_out/bin/aclrt_vmm_single_process_test --device 0 --size 4096
 ./build_out/bin/aclrt_vmm_device_ipc_test --device 0 --size 4096
-./build_out/bin/aclrt_vmm_host_ipc_test --device 0 --host-numa 0 --size 4096
+./build_out/bin/aclrt_vmm_host_memcpy --device 0 --host-numa 0 --size 4096
+./build_out/bin/aclrt_vmm_host_pointer --device 0 --host-numa 0 --size 4096
 ```
 
-Suite 入口会顺序运行单进程、Device IPC、Host IPC 和 Device-Host IPC：
+Suite 入口会顺序运行单进程、Device IPC、Host memcpy、Host pointer 和
+Device-Host IPC：
 
 ```bash
 ./build_out/bin/aclrt_vmm_tests --device 0 --host-numa 0 --size 4096
@@ -88,7 +95,8 @@ AscendCL，父进程和 child 之间只通过 pipe 交换 PID、共享句柄和�
 ./build_out/bin/aclrt_vmm_device_ipc_test --device 0 --size 4096 --disable-pid-validation
 ./build_out/bin/aclrt_vmm_device_ipc_test --device 0 --size 4096 --use-v1
 ./build_out/bin/aclrt_vmm_device_ipc_test --device 0 --size 4096 --share-type fabric
-./build_out/bin/aclrt_vmm_host_ipc_test --device 0 --host-numa 0 --size 4096 --use-v1
+./build_out/bin/aclrt_vmm_host_memcpy --device 0 --host-numa 0 --size 4096 --use-v1
+./build_out/bin/aclrt_vmm_host_pointer --device 0 --host-numa 0 --size 4096 --use-v1
 ```
 
 `--size` 是实际校验的数据长度；device physical memory 会用
