@@ -1,0 +1,45 @@
+#pragma once
+
+#include <acl/acl.h>
+#include <cstddef>
+#include <string>
+
+namespace acltest {
+
+enum class ShareKind {
+    Default,
+    Fabric,
+};
+
+struct Options {
+    int device = 0;
+    int host_numa = 0;
+    size_t requested_size = 4096;
+    bool disable_pid_validation = false;
+    bool force_v1 = false;
+    ShareKind share_kind = ShareKind::Default;
+    std::string ipc_child_executable;
+};
+
+using TestFn = bool (*)(const Options&);
+
+struct TestCase {
+    const char* name;
+    TestFn run;
+};
+
+enum class StartupDisplayMode {
+    Default,
+    SingleProcessBanner,
+};
+
+int RunTestProgram(int argc, char** argv, const char* title, const TestCase* tests,
+                   size_t test_count,
+                   StartupDisplayMode display_mode = StartupDisplayMode::Default);
+
+bool RunSingleProcessVmmTest(const Options& options);
+bool RunVmmDeviceIpcTest(const Options& options);
+bool RunVmmHostIpcTest(const Options& options);
+bool RunVmmDeviceHostIpcTest(const Options& options);
+
+}  // namespace acltest
